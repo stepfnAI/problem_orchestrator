@@ -67,13 +67,41 @@ An AI-powered machine learning pipeline designed for analyzing SaaS (Software as
 - Python 3.9-3.11
 - OpenAI API key (GPT-4 access required)
 
-[Rest of installation and setup remains the same...]
+### Installation
+1. Clone the repository:
+
+```bash
+git clone https://github.com/stepfnAI/problem_orchestrator.git
+cd problem_orchestrator
+```
+
+2. Create and activate a virtual environment using virtualenv:
+
+```bash
+pip install virtualenv                # Install virtualenv if not already installed
+virtualenv venv                       # Create virtual environment
+source venv/bin/activate             # Linux/Mac
+# OR
+.\venv\Scripts\activate              # Windows
+```
+
+3. Install the package in editable mode:
+
+```bash
+pip install -r requirements.txt
+```
+
+4. Set up your OpenAI API key:
+
+```bash
+export OPENAI_API_KEY='your_openai_api_key'
+```
 
 🔄 Pipeline Workflow
 
 1. **Start the Application**
 
-```
+```bash
 # Windows
 streamlit run .\orchestration\main_orchestration.py
 
@@ -94,7 +122,6 @@ streamlit run ./orchestration/main_orchestration.py
    - Select best performing model
    - Run inference on new data
 
-[Data Requirements section remains the same...]
 
 🛠️ Architecture
 
