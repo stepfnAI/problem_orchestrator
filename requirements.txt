@@ -1,0 +1,4 @@
+sfn-cleaning-agent @ git+https://github.com/stepfnAI/cleaning_agent.git@main#egg=sfn_cleaning_agent
+sfn-aggregation-agent @ git+https://github.com/stepfnAI/aggregation_agent.git@main#egg=sfn_aggregation_agent
+sfn-mapping-agent @ git+https://github.com/stepfnAI/mapping_agent.git@main#egg=sfn_mapping_agent
+sfn-classification-agent @ git+https://github.com/stepfnAI/classification_agent.git@main#egg=sfn_classification_agent
