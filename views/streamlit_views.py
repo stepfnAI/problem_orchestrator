@@ -3,6 +3,7 @@ from typing import List, Tuple, Optional, Any, Dict
 from sfn_blueprint.views.streamlit_view import SFNStreamlitView
 import streamlit as st
 
+
 class SFNStreamlitView(SFNStreamlitView):
     def __init__(self, title: str):
         self.title = title
@@ -31,12 +32,12 @@ class SFNStreamlitView(SFNStreamlitView):
         """Display a pandas DataFrame"""
         # Create a copy to avoid modifying the original DataFrame
         display_df = df.copy()
-        
+
         # If index is not default numeric, add it as a column while preserving the original
         if not isinstance(display_df.index, pd.RangeIndex):
             # Reset index but keep it as a column
             display_df = display_df.reset_index()
-        
+
         st.dataframe(display_df)
 
     def file_uploader(self, label: str, key: Optional[str] = None, accepted_types: List[str] = None) -> Any:
@@ -84,9 +85,15 @@ class SFNStreamlitView(SFNStreamlitView):
             label_visibility=label_visibility
         )
 
+    def download_dataframe(self, df: pd.DataFrame, file_name: str, label: str = "Download"):
+        """Create a download button for a pandas DataFrame"""
+        st.download_button(label=label, data=df.to_csv(
+            index=False), file_name=file_name, mime='text/csv')
+
     def create_download_button(self, label: str, data: Any, file_name: str, mime_type: str):
         """Create a download button"""
-        st.download_button(label=label, data=data, file_name=file_name, mime=mime_type)
+        st.download_button(label=label, data=data,
+                           file_name=file_name, mime=mime_type)
 
     def display_progress_bar(self, progress: float):
         """Display a progress bar"""
@@ -116,14 +123,14 @@ class SFNStreamlitView(SFNStreamlitView):
 
     def text_area(self, label: str, value: str = "", height: int = None, help: str = None, key: str = None) -> str:
         """Display a multi-line text input widget
-        
+
         Args:
             label (str): Label for the text area
             value (str, optional): Default text value. Defaults to "".
             height (int, optional): Height of the text area in pixels. Defaults to None.
             help (str, optional): Tooltip help text. Defaults to None.
             key (str, optional): Unique key for the component. Defaults to None.
-            
+
         Returns:
             str: Text entered by the user
         """
@@ -137,12 +144,12 @@ class SFNStreamlitView(SFNStreamlitView):
 
     def display_radio(self, label: str, options: list, key: str = None) -> str:
         """Display a radio button group
-        
+
         Args:
             label (str): Label for the radio group
             options (list): List of options to display
             key (str): Unique key for the component
-            
+
         Returns:
             str: Selected option
         """
