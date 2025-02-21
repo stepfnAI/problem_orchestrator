@@ -1,4 +1,24 @@
-sfn-cleaning-agent @ git+https://github.com/stepfnAI/cleaning_agent.git@main#egg=sfn_cleaning_agent
-sfn-aggregation-agent @ git+https://github.com/stepfnAI/aggregation_agent.git@main#egg=sfn_aggregation_agent
-sfn-mapping-agent @ git+https://github.com/stepfnAI/mapping_agent.git@main#egg=sfn_mapping_agent
-sfn-classification-agent @ git+https://github.com/stepfnAI/classification_agent.git@main#egg=sfn_classification_agent
+# Core dependencies
+sfn_blueprint==0.5.2
+sfn-llm-client==0.1.0
+pandas>=1.5.0
+numpy>=1.21.0
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# Testing
+pytest-cov>=4.0.0
+
+# Type checking
+mypy>=1.0.0
+
+# Code formatting
+black>=22.0.0
+isort>=5.0.0
+
+# Streamlit
+streamlit>=1.39.0
+
+# Other specialized agents (add as needed)
+# agent1>=1.0.0
+# agent2>=2.0.0 
