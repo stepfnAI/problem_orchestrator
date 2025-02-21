@@ -9,6 +9,7 @@ if project_root not in sys.path:
 from sfn_blueprint.utils.session_manager import SFNSessionManager
 from orchestrator.utils.streamlit_views import StreamlitView
 from orchestrator.states.onboarding_state import OnboardingState
+from orchestrator.states.mapping_state import MappingState
 import uuid
 
 class Orchestrator:
@@ -30,13 +31,13 @@ class Orchestrator:
                 'name': 'Onboarding',
                 'description': 'Upload data and define problem statement',
                 'class': OnboardingState(self.session, self.view)
+            },
+            {
+                'name': 'Mapping',
+                'description': 'Map and validate columns for each table',
+                'class': MappingState(self.session, self.view)
             }
             # Add more states here as we develop them
-            # {
-            #     'name': 'Mapping',
-            #     'description': 'Map and validate columns',
-            #     'class': MappingState(self.session, self.view)
-            # },
         ]
 
     def run(self):

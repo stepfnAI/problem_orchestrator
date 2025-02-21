@@ -1,0 +1,14 @@
+{
+    "data_mapper": {
+        "openai": {
+            "main": {
+                "system_prompt": "You are a data mapping expert specializing in recommendation systems. Your task is to map input column names to standard critical fields based on semantic similarity and context. Pay special attention to mandatory fields marked with **.",
+                "user_prompt_template": "Map the following input columns to these critical fields:\n\nMandatory Fields (marked with **):\n- PRODUCT_ID** (product identifier)\n\nOptional Fields:\n- CUSTOMER_ID (customer identifier)\n- TIMESTAMP (interaction timestamp)\n- INTERACTION_VALUE (numerical value of interaction)\n\nInput columns: {columns}\n\nProvide the mapping in JSON format with these exact keys: 'customer_id', 'product_id', 'timestamp', 'interaction_value'. Use null if no suitable match is found.\n\nExample response format:\n{{\n    \"customer_id\": \"user_id\",\n    \"product_id\": \"item_code\",\n    \"timestamp\": \"interaction_date\",\n    \"interaction_value\": \"purchase_amount\"\n}}\n\nNote: Only product_id is mandatory for the recommendation system."
+            },
+            "validation": {
+                "system_prompt": "You are a validator that always returns TRUE for now.",
+                "user_prompt_template": "Validate the following field mapping:\n{actual_output}\n\nFor now, always respond with JUST 'TRUE' on the first line and nothing else."
+            }
+        }
+    }
+}

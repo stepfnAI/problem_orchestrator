@@ -282,7 +282,7 @@ class OnboardingState(BaseState):
             
             # Create summary dictionary with more details
             summary = {
-                'num_tables': len(uploaded_tables),
+                'num_tables': str(len(uploaded_tables)),
                 'problem_type': problem_type,
                 'target_column': target_column if target_column else "None",
                 'has_target': str(bool(target_column)),
@@ -294,20 +294,16 @@ class OnboardingState(BaseState):
             
             # Save summary to database
             session_id = self.session.get('session_id')
-            if self.db.save_state_summary('onboarding', summary, session_id):
-                # Save each uploaded table
-                for idx, table_info in enumerate(uploaded_tables):
-                    df = pd.read_csv(table_info['path']) if table_info['path'].endswith('.csv') \
-                        else pd.read_excel(table_info['path'])
-                    
-                    table_name = f"table_{idx + 1}"
-                    if not self.db.save_table_to_db('onboarding', table_name, df, session_id):
-                        return False
-                
-                self.session.set('summary_complete', True)
-                return True
-                
-            return False
+            if not self.db.save_state_summary('onboarding', summary, session_id):
+                return False
+            
+            # Save each uploaded table to database
+            if not self.db.save_uploaded_tables(session_id, uploaded_tables):
+                self.view.show_message("❌ Error saving tables to database", "error")
+                return False
+            
+            self.session.set('summary_complete', True)
+            return True
             
         except Exception as e:
             self.view.show_message(f"Error generating summary: {str(e)}", "error")
