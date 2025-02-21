@@ -159,3 +159,6 @@ Contributions are welcome! Please follow these steps:
 📧 Contact
 Email: puneet@stepfunction.ai
 
+##
+sudo apt-get install sqlitebrowser
+sqlitebrowser orchestrator.db
