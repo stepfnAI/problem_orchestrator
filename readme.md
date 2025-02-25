@@ -106,7 +106,7 @@ export OPENAI_API_KEY='your_openai_api_key'
 streamlit run .\orchestration\main_orchestration.py
 
 # Linux/Mac
-streamlit run ./orchestration/main_orchestration.py
+streamlit run orchestrator/app.py
 ```
 
 
@@ -162,3 +162,4 @@ Email: puneet@stepfunction.ai
 ##
 sudo apt-get install sqlitebrowser
 sqlitebrowser orchestrator.db
+

@@ -22,8 +22,9 @@ class OnboardingState(BaseState):
         
     def execute(self):
         """Execute the onboarding workflow"""
-        # Check if state is already complete
+        # If already complete, show summary and return
         if self.session.get('onboarding_complete'):
+            self._show_state_summary()
             return True
             
         # Step 1: Handle data upload if not done
@@ -58,21 +59,31 @@ class OnboardingState(BaseState):
                     return False
                 
             self.view.display_subheader("✅ Onboarding Complete!")
-            self.view.display_markdown("### Summary")
-            self.view.display_markdown(f"- Tables Uploaded: {len(self.session.get('uploaded_tables', []))}")
-            self.view.display_markdown(f"- Problem Type: {self.session.get('problem_type').title()}")
+            
+            # Create a summary message with all information together
+            uploaded_tables = self.session.get('uploaded_tables', [])
+            tables_info = "\n".join([f"- **{table['name']}** ({table['rows']:,} rows × {table['columns']} columns)" 
+                                    for table in uploaded_tables])
+            
+            summary_message = f"### Summary\n\n"
+            summary_message += f"**Tables Uploaded:**\n{tables_info}\n\n"
+            summary_message += f"**Problem Type:** {self.session.get('problem_type').title()}\n"
+            
             if self.session.get('target_column'):
-                self.view.display_markdown(f"- Target Column: {self.session.get('target_column')}")
+                summary_message += f"**Target Column:** {self.session.get('target_column')}"
+                
+            self.view.show_message(summary_message, "info")
             
             if self.view.display_button("▶️ Proceed to Next Step"):
                 self.session.set('onboarding_complete', True)
+                self._show_state_summary()  # Show final summary with success styling
                 return True
         
         return False
         
     def _handle_data_upload(self) -> bool:
         """Handle multiple table uploads"""
-        self.view.display_header("Welcome to StepFn AI Orchestrator! 🚀")
+        self.view.display_header("Welcome to the AI Orchestrator! 🚀")
         self.view.display_markdown(
             "Let's begin by uploading all the tables you want to process. "
             "You can upload multiple tables one by one."
@@ -86,21 +97,19 @@ class OnboardingState(BaseState):
         
         # Always show current uploads summary if any
         if uploaded_tables:
-            self.view.display_subheader("📊 Currently Uploaded Tables")
-            summary = "The following tables have been uploaded:\n\n"
+            summary = "## 📊 Currently Uploaded Tables\n\nThe following tables have been uploaded:\n\n"
             for idx, table in enumerate(uploaded_tables, 1):
                 summary += f"{idx}. **{table['name']}** (Rows: {table['rows']:,}, Columns: {table['columns']})\n"
-            self.view.display_markdown(summary)
-            self.view.display_markdown(f"\nTotal tables uploaded: **{len(uploaded_tables)}**")
+            summary += f"\nTotal tables uploaded: **{len(uploaded_tables)}**"
+            self.view.show_message(summary, "info")
             self.view.display_markdown("---")
-        
         # If data_upload_complete is set, show summary only
         if self.session.get('data_upload_complete'):
             self.view.display_subheader("📊 Data Upload Summary")
             summary = "Successfully uploaded the following tables:\n\n"
             for idx, table in enumerate(uploaded_tables, 1):
                 summary += f"{idx}. **{table['name']}** (Rows: {table['rows']:,}, Columns: {table['columns']})\n"
-            self.view.display_markdown(summary)
+            self.view.show_message(summary, "info")
             return True
         
         # Show file uploader if no tables or in upload mode
@@ -168,13 +177,14 @@ class OnboardingState(BaseState):
         
     def _handle_problem_statement(self) -> bool:
         """Handle problem statement selection"""
-        self.view.display_subheader("Problem Statement Identification")
-                
-        # Show problem type descriptions
-        info_text = "We support the following types of problems:\n\n"
+        # Create problem type descriptions as a formatted string
+        info_text = "### Problem Statement Identification\n\n"
+        info_text += "We support the following types of problems:\n\n"
         for problem_type, description in self.problem_types.items():
             info_text += f"**{problem_type.title()}**: {description}\n\n"
-        self.view.display_markdown(info_text)
+        
+        # Display as an info message instead of separate header and markdown
+        self.view.show_message(info_text, "info")
         
         # Radio selection for problem type
         selected_type = self.view.display_radio(
@@ -317,4 +327,21 @@ class OnboardingState(BaseState):
     def _save_summary_to_db(self, summary: Dict) -> bool:
         """Save state summary to database"""
         session_id = self.session.get('session_id')
-        return self.db.save_state_summary(session_id, summary) 
+        return self.db.save_state_summary(session_id, summary)
+
+    def _show_state_summary(self):
+        """Display a summary of the completed onboarding state"""
+        # Create a summary message with all information together
+        uploaded_tables = self.session.get('uploaded_tables', [])
+        tables_info = "\n".join([f"- **{table['name']}** ({table['rows']:,} rows × {table['columns']} columns)" 
+                                for table in uploaded_tables])
+        
+        summary_message = f"#### ✅ Onboarding Complete\n\n"
+        summary_message += f"**Tables Uploaded:**\n{tables_info}\n\n"
+        summary_message += f"**Problem Type:** {self.session.get('problem_type').title()}\n"
+        
+        if self.session.get('target_column'):
+            summary_message += f"**Target Column:** {self.session.get('target_column')}"
+        
+        # Display the summary with success styling
+        self.view.show_message(summary_message, "success") 

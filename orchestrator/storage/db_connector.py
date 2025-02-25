@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Any
 import pandas as pd
 import json
 from pathlib import Path
+import os
 
 class DatabaseConnector:
     """Handles database connections and operations"""
@@ -38,9 +39,9 @@ class DatabaseConnector:
                 )
             """)
             
-            # Create other necessary tables...
+            # Create other necessary tables - use consistent naming convention
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS onboarding_state_summary (
+                CREATE TABLE IF NOT EXISTS onboarding_summary (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     session_id TEXT NOT NULL,
                     num_tables TEXT NOT NULL,
@@ -144,6 +145,21 @@ class DatabaseConnector:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute(create_table_sql)
                 conn.execute(insert_sql, [str(summary_data[col]) for col in columns])
+                
+                # Register the summary table in the registry
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO table_registry 
+                    (session_id, table_name, original_name, row_count, column_count)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    session_id,
+                    table_name,
+                    f"{state_name}_summary",
+                    1,  # One row per summary
+                    len(columns)
+                ))
+                
                 conn.commit()
             return True
             
@@ -180,7 +196,7 @@ class DatabaseConnector:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT * FROM onboarding_state_summary WHERE session_id = ?",
+                    "SELECT * FROM onboarding_summary WHERE session_id = ?",
                     (session_id,)
                 )
                 row = cursor.fetchone()
@@ -301,7 +317,7 @@ class DatabaseConnector:
                 
                 # Create table if not exists
                 cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS table_mappings (
+                    CREATE TABLE IF NOT EXISTS mappings_summary (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         session_id TEXT NOT NULL,
                         table_name TEXT NOT NULL,
@@ -312,7 +328,7 @@ class DatabaseConnector:
                 
                 # Insert mapping data
                 cursor.execute("""
-                    INSERT INTO table_mappings (session_id, table_name, mappings)
+                    INSERT INTO mappings_summary (session_id, table_name, mappings)
                     VALUES (?, ?, ?)
                 """, (
                     mapping_data['session_id'],
@@ -320,9 +336,107 @@ class DatabaseConnector:
                     mapping_data['mappings']
                 ))
                 
+                # Register in table registry - include all entries including state summary
+                table_name = 'mappings_summary'
+                original_name = f"mappings_{mapping_data['table_name']}"
+                
+                cursor.execute("""
+                    INSERT OR REPLACE INTO table_registry 
+                    (session_id, table_name, original_name, row_count, column_count)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    mapping_data['session_id'],
+                    table_name,
+                    original_name,
+                    1,
+                    3  # session_id, table_name, and mappings
+                ))
+                
                 conn.commit()
                 return True
                 
         except Exception as e:
             print(f"Error saving table mappings: {e}")
+            return False
+
+    def reset_session_data(self, session_id: str) -> bool:
+        """Reset all data for a specific session
+        
+        Args:
+            session_id (str): Session identifier
+            
+        Returns:
+            bool: Success status
+        """
+        try:
+            # For a complete reset, simply delete and recreate the database file
+            if os.path.exists(self.db_path):
+                os.remove(self.db_path)
+                print(f"Deleted database file: {self.db_path}")
+                
+            # Reinitialize the database
+            self._ensure_db_path()
+            self._init_db()
+            print("Reinitialized database")
+            
+            return True
+                
+        except Exception as e:
+            print(f"Error resetting session data: {e}")
+            return False
+
+    def reset_state_data(self, session_id: str, state_name: str) -> bool:
+        """Reset data for a specific state in a session
+        
+        Args:
+            session_id (str): Session identifier
+            state_name (str): Name of the state to reset
+            
+        Returns:
+            bool: Success status
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Drop state summary tables - try both naming conventions
+                try:
+                    cursor.execute(f"DROP TABLE IF EXISTS {state_name}_state_summary")
+                except sqlite3.OperationalError:
+                    pass
+                    
+                try:
+                    cursor.execute(f"DROP TABLE IF EXISTS {state_name}_summary")
+                except sqlite3.OperationalError:
+                    pass
+                
+                # If it's the onboarding state, also drop data tables
+                if state_name == 'onboarding':
+                    # Get all tables in the registry for this session
+                    cursor.execute(
+                        "SELECT table_name FROM table_registry WHERE session_id = ?",
+                        (session_id,)
+                    )
+                    tables = [row[0] for row in cursor.fetchall()]
+                    
+                    # Drop each table
+                    for table in tables:
+                        try:
+                            cursor.execute(f"DROP TABLE IF EXISTS {table}")
+                        except sqlite3.OperationalError:
+                            # Table might not exist, continue
+                            pass
+                    
+                    # Delete from registry
+                    cursor.execute("DELETE FROM table_registry WHERE session_id = ?", (session_id,))
+                
+                # If it's the mapping state, delete mappings
+                elif state_name == 'mapping':
+                    cursor.execute("DELETE FROM table_mappings WHERE session_id = ?", (session_id,))
+                
+                conn.commit()
+                return True
+                
+        except Exception as e:
+            print(f"Error resetting state data: {e}")
             return False 

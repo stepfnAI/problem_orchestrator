@@ -35,30 +35,41 @@ class SFNDataMappingAgent(SFNAgent):
     def _identify_fields(self, columns: List[str], problem_type: str) -> Dict[str, str]:
         """Identify fields based on problem type"""
         # Configure mapping based on problem type
-        mapping_config = {
+        mandatory_mapping = {
             'classification': ['id', 'target'],
             'regression': ['id', 'target'],
-            'recommendation': ['product_id', 'customer_id', 'interaction_value'],
-            'clustering': ['features'],
+            'recommendation': ['product_id'],
+            'clustering': ['id'],
             'forecasting': ['timestamp', 'target']
         }
         
-        required_fields = mapping_config.get(problem_type, [])
+        optional_mapping = {
+            'classification': ['product_id', 'timestamp', 'revenue'],
+            'regression': ['product_id', 'timestamp', 'revenue'],
+            'recommendation': ['id', 'interaction_value', 'timestamp'],
+            'clustering': ['product_id', 'timestamp', 'revenue'],
+            'forecasting': ['product_id', 'id', 'revenue']
+        }
+        
+        mandatory_fields = mandatory_mapping.get(problem_type, [])
+        optional_fields = optional_mapping.get(problem_type, [])
         
         # Use AI to suggest mappings
-        suggestions = self._get_ai_suggestions(columns, required_fields)
+        suggestions = self._get_ai_suggestions(columns, problem_type, mandatory_fields, optional_fields)
         
         # Validate and return mappings
-        return self._validate_mappings(suggestions, required_fields)
+        return self._validate_mappings(suggestions, mandatory_fields, optional_fields)
 
-    def _get_ai_suggestions(self, columns: List[str], required_fields: List[str]) -> Dict[str, str]:
+    def _get_ai_suggestions(self, columns: List[str], problem_type: str, mandatory_fields: List[str], optional_fields: List[str]) -> Dict[str, str]:
         """Get AI suggestions for mappings"""
         system_prompt, user_prompt = self.prompt_manager.get_prompt(
             agent_type='data_mapper',
             llm_provider=self.llm_provider,
             prompt_type='main',
             columns=columns,
-            required_fields=required_fields
+            problem_type=problem_type,
+            mandatory_fields=mandatory_fields,
+            optional_fields=optional_fields
         )
 
         configuration = {
@@ -91,16 +102,30 @@ class SFNDataMappingAgent(SFNAgent):
             end_idx = cleaned_str.rfind('}')
             if start_idx != -1 and end_idx != -1:
                 cleaned_str = cleaned_str[start_idx:end_idx + 1]
-            
+            print(f">>>Cleaned string: {cleaned_str}")
             return json.loads(cleaned_str)
         except Exception as e:
             print(f"Error parsing AI response: {str(e)}")
-            return {field: None for field in required_fields}
+            # Return empty mappings for all fields
+            return {field: None for field in mandatory_fields + optional_fields}
 
-    def _validate_mappings(self, mappings: Dict[str, str], required_fields: List[str]) -> Dict[str, str]:
+    def _validate_mappings(self, mappings: Dict[str, str], mandatory_fields: List[str], optional_fields: List[str]) -> Dict[str, str]:
         """Validate the mappings"""
-        return {field: mappings.get(field) for field in required_fields}
-
+        print(f">>>Mappings before validation: {mappings}")
+        
+        # Check if all mandatory fields are mapped
+        for field in mandatory_fields:
+            if field not in mappings or mappings[field] is None:
+                print(f"Warning: Mandatory field '{field}' is not mapped")
+        
+        # Create result dictionary with all fields (mandatory + optional)
+        result = {}
+        for field in mandatory_fields + optional_fields:
+            result[field] = mappings.get(field)
+        
+        print(f">>>Mappings after validation: {result}")
+        return result
+    
     def get_validation_params(self, response, task):
         """Get validation parameters"""
         return self.prompt_manager.get_prompt(
