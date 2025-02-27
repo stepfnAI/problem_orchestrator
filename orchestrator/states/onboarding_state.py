@@ -44,20 +44,34 @@ class OnboardingState(BaseState):
             else:
                 self.session.set('target_column_complete', True)
                 
-        # Step 4: Generate and save state summary
-        if not self.session.get('summary_complete'):
+        # Step 4: Handle time series data identification if needed
+        if not self.session.get('time_series_complete'):
+            if self._needs_time_series_check() and not self._handle_time_series_check():
+                return False
+            else:
+                # For problem types other than classification and regression,
+                # automatically mark time_series_complete as True
+                if not self._needs_time_series_check():
+                    self.session.set('time_series_complete', True)
+                    self.session.set('is_time_series', False)  # Default to False for other problem types
+        
+        # Step 5: Generate and save state summary
+        if (self.session.get('data_upload_complete') and 
+            self.session.get('problem_statement_complete') and 
+            self.session.get('target_column_complete') and
+            self.session.get('time_series_complete') and
+            not self.session.get('summary_complete')):
+            
             if not self._generate_state_summary():
                 return False
                 
         # If all steps complete, show summary and next step button
         if (self.session.get('data_upload_complete') and 
             self.session.get('problem_statement_complete') and 
-            self.session.get('target_column_complete')):
+            self.session.get('target_column_complete') and
+            self.session.get('time_series_complete') and
+            self.session.get('summary_complete')):
             
-            if not self.session.get('summary_complete'):
-                if not self._generate_state_summary():
-                    return False
-                
             self.view.display_subheader("✅ Onboarding Complete!")
             
             # Create a summary message with all information together
@@ -70,8 +84,12 @@ class OnboardingState(BaseState):
             summary_message += f"**Problem Type:** {self.session.get('problem_type').title()}\n"
             
             if self.session.get('target_column'):
-                summary_message += f"**Target Column:** {self.session.get('target_column')}"
-                
+                summary_message += f"**Target Column:** {self.session.get('target_column')}\n"
+            
+            # Add time series information to summary if applicable
+            if self.session.get('is_time_series') is not None:
+                summary_message += f"**Time Series Data:** {'Yes' if self.session.get('is_time_series') else 'No'}\n"
+            
             self.view.show_message(summary_message, "info")
             
             if self.view.display_button("▶️ Proceed to Next Step"):
@@ -282,13 +300,69 @@ class OnboardingState(BaseState):
         
         return False
         
+    def _needs_time_series_check(self) -> bool:
+        """Check if we need to ask about time series data"""
+        problem_type = self.session.get('problem_type')
+        # Only ask about time series for regression and classification
+        return problem_type in ['classification', 'regression']
+        
+    def _handle_time_series_check(self) -> bool:
+        """Handle time series data identification"""
+        problem_type = self.session.get('problem_type')
+        
+        # Show current progress
+        uploaded_tables = self.session.get('uploaded_tables', [])
+        self.view.display_markdown("### 📊 Uploaded Data")
+        for idx, table in enumerate(uploaded_tables, 1):
+            self.view.display_markdown(f"{idx}. **{table['name']}** (Rows: {table['rows']:,}, Columns: {table['columns']})")
+        self.view.display_markdown(f"\n**Selected Problem Type**: {problem_type.title()}")
+        
+        if self.session.get('target_column'):
+            self.view.display_markdown(f"**Target Column**: {self.session.get('target_column')}")
+        
+        self.view.display_markdown("---")
+        
+        self.view.display_subheader("Time Series Data Identification")
+        
+        self.view.display_markdown(
+            "We need to know if your data has a time component. This helps us determine "
+            "the appropriate modeling approach and feature engineering techniques."
+        )
+        
+        self.view.display_markdown(
+            "**Note:** If your data is time series, each table should have a timestamp column. "
+            "This column will be required during the mapping phase."
+        )
+        
+        is_time_series = self.view.radio_select(
+            "Does your data have a time component?",
+            options=["Yes", "No"],
+            key="is_time_series_radio"
+        )
+        
+        if self.view.display_button("Confirm"):
+            self.session.set('is_time_series', is_time_series == "Yes")
+            self.session.set('time_series_complete', True)
+            # Force a rerun to immediately proceed to the next step
+            self.view.rerun_script()
+            return True
+        
+        return False
+        
     def _generate_state_summary(self) -> bool:
         """Generate and save state summary"""
         try:
+            print("Generating state summary...")
             # Get all required information
             uploaded_tables = self.session.get('uploaded_tables', [])
             problem_type = self.session.get('problem_type')
             target_column = self.session.get('target_column')
+            is_time_series = self.session.get('is_time_series')
+            
+            print(f"Problem type: {problem_type}")
+            print(f"Target column: {target_column}")
+            print(f"Is time series: {is_time_series}")
+            print(f"Tables: {[t['name'] for t in uploaded_tables]}")
             
             # Create summary dictionary with more details
             summary = {
@@ -296,6 +370,7 @@ class OnboardingState(BaseState):
                 'problem_type': problem_type,
                 'target_column': target_column if target_column else "None",
                 'has_target': str(bool(target_column)),
+                'is_time_series': str(bool(is_time_series)) if is_time_series is not None else "None",
                 'table_names': json.dumps([table['name'] for table in uploaded_tables]),
                 'table_rows': json.dumps([table['rows'] for table in uploaded_tables]),
                 'table_columns': json.dumps([table['columns'] for table in uploaded_tables]),
@@ -304,18 +379,24 @@ class OnboardingState(BaseState):
             
             # Save summary to database
             session_id = self.session.get('session_id')
+            print(f"Saving summary to database for session {session_id}")
             if not self.db.save_state_summary('onboarding', summary, session_id):
+                print("Failed to save state summary")
                 return False
             
             # Save each uploaded table to database
+            print("Saving tables to database")
             if not self.db.save_uploaded_tables(session_id, uploaded_tables):
                 self.view.show_message("❌ Error saving tables to database", "error")
+                print("Failed to save tables")
                 return False
             
+            print("Summary generation complete")
             self.session.set('summary_complete', True)
             return True
             
         except Exception as e:
+            print(f"Error in _generate_state_summary: {str(e)}")
             self.view.show_message(f"Error generating summary: {str(e)}", "error")
             return False
         
@@ -341,7 +422,11 @@ class OnboardingState(BaseState):
         summary_message += f"**Problem Type:** {self.session.get('problem_type').title()}\n"
         
         if self.session.get('target_column'):
-            summary_message += f"**Target Column:** {self.session.get('target_column')}"
+            summary_message += f"**Target Column:** {self.session.get('target_column')}\n"
+        
+        # Add time series information to summary if applicable
+        if self.session.get('is_time_series') is not None:
+            summary_message += f"**Time Series Data:** {'Yes' if self.session.get('is_time_series') else 'No'}\n"
         
         # Display the summary with success styling
         self.view.show_message(summary_message, "success") 

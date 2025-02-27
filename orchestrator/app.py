@@ -13,6 +13,7 @@ from orchestrator.states.mapping_state import MappingState
 from orchestrator.storage.db_connector import DatabaseConnector
 import uuid
 from orchestrator.states.aggregation_state import AggregationState
+from orchestrator.states.join_state import JoinState
 
 class Orchestrator:
     def __init__(self):
@@ -29,24 +30,35 @@ class Orchestrator:
             self.session.set('current_state', 0)
         
         # Create state instances
+        onboarding_state = OnboardingState(self.session, self.view)
+        mapping_state = MappingState(self.session, self.view)
+        aggregation_state = AggregationState(self.session, self.view)
+        join_state = JoinState(self.session, self.view)
+        
         self.states = [
             {
                 'id': 'onboarding',
                 'name': 'Data Onboarding',
                 'description': 'Upload data and define problem statement',
-                'class': OnboardingState(self.session, self.view)
+                'class': onboarding_state
             },
             {
                 'id': 'mapping',
                 'name': 'Column Mapping',
                 'description': 'Map and validate columns for each table',
-                'class': MappingState(self.session, self.view)
+                'class': mapping_state
             },
             {
                 'id': 'aggregation',
                 'name': 'Data Aggregation',
                 'description': 'Aggregate and transform data for modeling',
-                'class': AggregationState(self.session, self.view)
+                'class': aggregation_state
+            },
+            {
+                'id': 'join',
+                'name': 'Table Joining',
+                'description': 'Join tables based on mapping',
+                'class': join_state
             }
             # Add more states as needed
         ]
@@ -56,6 +68,7 @@ class Orchestrator:
             {'id': 'onboarding', 'name': 'Data Onboarding'},
             {'id': 'mapping', 'name': 'Column Mapping'},
             {'id': 'aggregation', 'name': 'Data Aggregation'},
+            {'id': 'join', 'name': 'Table Joining'},
             {'id': 'model_setup', 'name': 'Model Setup'},
             {'id': 'training', 'name': 'Training & Evaluation'}
         ]
@@ -177,6 +190,8 @@ class Orchestrator:
             self.session.set('mapping_summary_complete', False)
             self.session.set('mapping_complete', False)
             self.session.set('mapping_results', {})
+        elif state_name == 'join':
+            self.session.set('join_complete', False)
         
         # Reset state-specific database entries
         session_id = self.session.get('session_id')

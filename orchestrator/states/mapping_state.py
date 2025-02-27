@@ -14,7 +14,7 @@ class MappingState(BaseState):
         'classification': ['id'],
         'regression': ['id'],
         'recommendation': ['product_id'],
-        'clustering': [],
+        'clustering': ['id'],
         'forecasting': ['timestamp']
     }
 
@@ -206,44 +206,78 @@ class MappingState(BaseState):
             # Get AI suggestions for mapping with spinner
             problem_type = self.session.get('problem_type')
             
-            # Create task with additional info in data dictionary
-            task_data = {
-                'df': df,
-                'problem_type': problem_type,
-                'table_name': table_name
-            }
+            # Check if we already have AI suggestions for this table
+            ai_mappings_key = f'ai_mappings_{table_name}'
+            mappings = self.session.get(ai_mappings_key)
             
-            # Show spinner while AI is working
-            with self.view.display_spinner('🤖 AI is suggesting column mappings...'):
-                # Updated Task creation to match the correct signature
-                mapping_task = Task("Map columns", task_data)
-                mappings = self.mapping_agent.execute_task(mapping_task)
+            # Only call the AI if we don't have mappings yet
+            if mappings is None:
+                # Create task with additional info in data dictionary
+                task_data = {
+                    'df': df,
+                    'problem_type': problem_type,
+                    'table_name': table_name
+                }
+                
+                # Show spinner while AI is working
+                with self.view.display_spinner('🤖 AI is suggesting column mappings...'):
+                    print(f">><<Calling mapping agent for table: {table_name}")
+                    # Updated Task creation to match the correct signature
+                    mapping_task = Task("Map columns", task_data)
+                    mappings = self.mapping_agent.execute_task(mapping_task)
+                    print(f">><<Mapping agent call completed for table: {table_name}")
+                    
+                # Store the AI suggestions in the session
+                self.session.set(ai_mappings_key, mappings)
             
             # Get mandatory columns for this problem type
             mandatory_cols = self.MANDATORY_COLUMNS.get(problem_type, [])
-            optional_cols = [k for k in mappings.keys() if k not in mandatory_cols]
             
-            # Calculate mapping success rate
-            mapped_fields = sum(1 for field in mappings if mappings[field] is not None)
-            total_fields = len(mappings)
-            mapping_success = f"{mapped_fields}/{total_fields}"
+            # Check if this is time series data
+            is_time_series = self.session.get('is_time_series', False)
+            
+            # If it's time series data and problem type is regression or classification,
+            # add timestamp to mandatory columns if not already there
+            if is_time_series and problem_type in ['regression', 'classification']:
+                if 'timestamp' not in mandatory_cols:
+                    mandatory_cols.append('timestamp')
+                    print(f">><<Added timestamp to mandatory columns for time series data")
+            
+            # Get optional columns (all mappings except mandatory ones)
+            optional_cols = [k for k in mappings.keys() if k not in mandatory_cols]
             
             # Display mapping interface
             self.view.display_subheader(f"Column Mapping for {table_name}")
-            self.view.show_message(f"AI successfully mapped {mapping_success} fields", "info")
-            self.view.display_markdown("Please confirm or modify the suggested mappings:")
+            
+            # Show validation message for mappings
+            print(f">>>Mappings before validation: {mappings}")
+            
+            # Validate mappings - ensure all mandatory fields have a value
+            for field in mandatory_cols:
+                if field not in mappings or not mappings[field]:
+                    # If mandatory field is missing or empty, set to None
+                    mappings[field] = None
+            
+            print(f">>>Mappings after validation: {mappings}")
+            
+            # Show success message for AI mappings
+            mapped_count = sum(1 for v in mappings.values() if v)
+            total_count = len(mappings)
+            self.view.show_message(f"AI successfully mapped {mapped_count}/{total_count} fields", "info")
             
             # First show mandatory fields
             confirmed_mappings = {}
             self.view.display_markdown("**Mandatory Fields:**")
             for col_type in mandatory_cols:
                 suggested_col = mappings.get(col_type)
+                print(f">><<Before select_box for {col_type}, suggested value: {suggested_col}")
                 selected_col = self.view.select_box(
                     f"Select {col_type} column:",
                     options=[""] + list(df.columns),
                     default=suggested_col,
                     key=f"mapping_{table_name}_{col_type}"
                 )
+                print(f">><<After select_box for {col_type}, selected value: {selected_col}")
                 confirmed_mappings[col_type] = selected_col
             
             # Then show optional fields if available
@@ -251,15 +285,17 @@ class MappingState(BaseState):
                 self.view.display_markdown("**Optional Fields:**")
                 for col_type in optional_cols:
                     suggested_col = mappings.get(col_type)
+                    print(f">><<Before select_box for {col_type}, suggested value: {suggested_col}")
                     selected_col = self.view.select_box(
                         f"Select {col_type} column (optional):",
                         options=[""] + list(df.columns),
                         default=suggested_col,
                         key=f"mapping_{table_name}_{col_type}_opt"
                     )
+                    print(f">><<After select_box for {col_type}, selected value: {selected_col}")
                     confirmed_mappings[col_type] = selected_col
-                    
-            # Single confirm button
+            
+            # Show confirm button
             if self.view.display_button(f"✅ Confirm Mappings", key=f"confirm_{table_name}"):
                 # Validate mappings - only mandatory fields must be mapped
                 if not all(confirmed_mappings.get(field) for field in mandatory_cols):
@@ -284,11 +320,11 @@ class MappingState(BaseState):
                 # Rerun to refresh the UI
                 self.view.rerun_script()
                 return True
-                
+            
             return False
             
         except Exception as e:
-            self.view.show_message(f"Error processing table {table_name}: {str(e)}", "error")
+            self.view.show_message(f"❌ Error processing table {table_name}: {str(e)}", "error")
             return False
             
     def _show_confirmed_mappings(self, table_name: str):
@@ -350,7 +386,7 @@ class MappingState(BaseState):
         
         selected_level = self.view.radio_select(
             "Select prediction level:",
-            options=["Customer Level", "Customer + Product Level"],
+            options=["ID Level", "ID+Product Level"],
             key="prediction_level"
         )
         

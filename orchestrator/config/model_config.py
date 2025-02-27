@@ -11,5 +11,14 @@ MODEL_CONFIG = {
             "n": 1,
             "stop": None
         }
+    },
+    "join_suggester": {
+        "openai": {
+            "model": DEFAULT_LLM_MODEL,
+            "temperature": 0.4,
+            "max_tokens": 800,
+            "n": 1,
+            "stop": None
+        }
     }
 }

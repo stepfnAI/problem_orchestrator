@@ -1,6 +1,8 @@
 # Core dependencies
+sfn-aggregation-agent @ git+https://github.com/stepfnAI/aggregation_agent.git@main#egg=sfn_aggregation_agent
 sfn_blueprint==0.5.2
 sfn-llm-client==0.1.0
+
 pandas>=1.5.0
 numpy>=1.21.0
 pyyaml>=6.0

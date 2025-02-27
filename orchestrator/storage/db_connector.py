@@ -111,60 +111,74 @@ class DatabaseConnector:
             print(f"Error saving tables to database: {e}")
             return False
     
-    def save_state_summary(self, state_name: str, summary_data: Dict[str, Any], session_id: str) -> bool:
-        """Save state summary dynamically based on provided data
+    def save_state_summary(self, state_name: str, summary: Dict, session_id: str) -> bool:
+        """Save state summary to database
         
         Args:
-            state_name: Name of the state (for table naming)
-            summary_data: Dictionary containing summary data
-            session_id: Session identifier
+            state_name: Name of the state
+            summary: Dictionary containing summary data
+            session_id: Session ID
+            
+        Returns:
+            bool: True if successful, False otherwise
         """
         try:
-            # Add session_id to summary data
-            summary_data['session_id'] = session_id
-            
-            # Create column definitions from dictionary keys
-            columns = list(summary_data.keys())
-            column_defs = [f"{col} TEXT" for col in columns]
-            
-            # Create table if not exists
-            table_name = f"{state_name}_summary"
-            create_table_sql = f"""
-            CREATE TABLE IF NOT EXISTS {table_name} (
-                {', '.join(column_defs)}
-            )
-            """
-            
-            # Insert data
-            placeholders = ','.join(['?' for _ in columns])
-            insert_sql = f"""
-            INSERT INTO {table_name} ({','.join(columns)})
-            VALUES ({placeholders})
-            """
-            
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute(create_table_sql)
-                conn.execute(insert_sql, [str(summary_data[col]) for col in columns])
-                
-                # Register the summary table in the registry
                 cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT OR REPLACE INTO table_registry 
-                    (session_id, table_name, original_name, row_count, column_count)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (
-                    session_id,
-                    table_name,
-                    f"{state_name}_summary",
-                    1,  # One row per summary
-                    len(columns)
-                ))
+                
+                # Create table if not exists with the new is_time_series column
+                cursor.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {state_name}_summary (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id TEXT,
+                        num_tables TEXT,
+                        problem_type TEXT,
+                        target_column TEXT,
+                        has_target TEXT,
+                        is_time_series TEXT,
+                        table_names TEXT,
+                        table_rows TEXT,
+                        table_columns TEXT,
+                        completion_time TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # Check if is_time_series column exists, add it if not
+                cursor.execute(f"PRAGMA table_info({state_name}_summary)")
+                columns = [column[1] for column in cursor.fetchall()]
+                
+                if 'is_time_series' not in columns:
+                    print(f"Adding is_time_series column to {state_name}_summary table")
+                    cursor.execute(f"ALTER TABLE {state_name}_summary ADD COLUMN is_time_series TEXT")
+                
+                # Insert summary data
+                cursor.execute(
+                    f"""
+                    INSERT INTO {state_name}_summary 
+                    (session_id, num_tables, problem_type, target_column, has_target, is_time_series, 
+                    table_names, table_rows, table_columns, completion_time)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        session_id,
+                        summary.get('num_tables', ''),
+                        summary.get('problem_type', ''),
+                        summary.get('target_column', ''),
+                        summary.get('has_target', ''),
+                        summary.get('is_time_series', ''),
+                        summary.get('table_names', ''),
+                        summary.get('table_rows', ''),
+                        summary.get('table_columns', ''),
+                        summary.get('completion_time', '')
+                    )
+                )
                 
                 conn.commit()
-            return True
-            
+                return True
+                
         except Exception as e:
-            print(f"Error saving state summary: {e}")
+            print(f"Error in save_state_summary: {str(e)}")
             return False
     
     def get_table_data(self, table_name: str) -> Optional[pd.DataFrame]:

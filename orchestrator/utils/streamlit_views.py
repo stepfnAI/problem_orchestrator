@@ -1,5 +1,5 @@
 from sfn_blueprint.views.streamlit_view import SFNStreamlitView
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Dict
 import streamlit as st
 import os
 from pathlib import Path
@@ -184,3 +184,46 @@ class StreamlitView(SFNStreamlitView):
             unsafe_allow_html (bool): Whether to allow HTML in markdown
         """
         st.markdown(text, unsafe_allow_html=unsafe_allow_html) 
+
+    def create_expander(self, label: str, expanded: bool = False) -> Any:
+        """Create an expandable/collapsible container
+        
+        Args:
+            label (str): Label for the expander
+            expanded (bool, optional): Whether the expander is initially expanded. Defaults to False.
+            
+        Returns:
+            streamlit.delta_generator.DeltaGenerator: Expander object
+        """
+        return st.expander(label=label, expanded=expanded) 
+
+    def display_table(self, data: List[Dict], use_container_width: bool = True):
+        """Display a table from a list of dictionaries
+        
+        Args:
+            data (List[Dict]): List of dictionaries where each dict represents a row
+            use_container_width (bool, optional): Whether to expand table to container width. Defaults to True.
+        """
+        if data:
+            # Convert list of dicts to DataFrame
+            df = pd.DataFrame(data)
+            st.dataframe(df, use_container_width=use_container_width)
+        else:
+            # Show a message if no data
+            st.info("No data to display") 
+
+    def radio_select(self, label: str, options: List[str], default: Optional[str] = None, key: Optional[str] = None) -> str:
+        """Display a radio button selection with default value support
+        
+        Args:
+            label (str): Label for the radio group
+            options (List[str]): List of options to choose from
+            default (str, optional): Default value to select. Defaults to None.
+            key (str, optional): Unique key for the component. Defaults to None.
+            
+        Returns:
+            str: Selected option
+        """
+        # Find index of default value if provided
+        index = options.index(default) if default and default in options else 0
+        return st.radio(label, options, index=index, key=key) 
