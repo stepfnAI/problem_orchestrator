@@ -7,6 +7,7 @@ import json
 import sqlite3
 from sfn_blueprint import Task
 import logging
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,11 @@ class JoinState(BaseState):
             if not self._fetch_mapping_summary():
                 return False
                 
+        # Check if we only have one table - special case handling
+        tables_data = self.session.get('tables_data', {})
+        if len(tables_data) == 1:
+            return self._handle_single_table_case()
+            
         # Step 3: Initialize join process if not done
         if not self.session.get('join_initialized'):
             if not self._initialize_join_process():
@@ -455,10 +461,9 @@ class JoinState(BaseState):
             )
             
             # Select join type
-            join_type = self.view.radio_select(
-                "Join Type:",
-                options=["inner", "left", "right", "outer"],
-                default=join_suggestion.get("type_of_join", "inner"),
+            join_type = self.view.select_box(
+                "Select join type:",
+                options=["left", "inner"],  # Removed right, outer, and cross join options
                 key="join_type"
             )
             
@@ -490,6 +495,8 @@ class JoinState(BaseState):
             
             # Display existing joining fields
             new_joining_fields = []
+            removed_indices = []
+            
             for i, field_pair in enumerate(current_joining_fields):
                 left_col = field_pair[0] if len(field_pair) > 0 else ""
                 right_col = field_pair[1] if len(field_pair) > 1 else ""
@@ -512,14 +519,21 @@ class JoinState(BaseState):
                     key=f"right_col_{i}"
                 )
                 
+                # Add remove button
+                if self.view.display_button("Remove", key=f"remove_join_{i}"):
+                    removed_indices.append(i)
+                    # Don't add this pair to new_joining_fields
+                    continue
+                
                 # Add to new joining fields if both columns selected
                 if left_col and right_col:
                     new_joining_fields.append([left_col, right_col])
-                
-                # Add remove button
-                if self.view.display_button("Remove", key=f"remove_join_{i}"):
-                    # Don't add this pair to new_joining_fields
-                    continue
+            
+            # If any fields were removed, update the session and rerun
+            if removed_indices:
+                self.session.set('current_joining_fields', new_joining_fields)
+                self.view.rerun_script()
+                return False
             
             # Add button to add new joining field
             if self.view.display_button("+ Add Join Condition", key="add_join_condition"):
@@ -541,11 +555,16 @@ class JoinState(BaseState):
                     left_df = all_tables_data[left_table]
                     right_df = all_tables_data[right_table]
                     
+                    # Extract left and right joining fields for the join operation
+                    left_joining_fields = [pair[0] for pair in new_joining_fields]
+                    right_joining_fields = [pair[1] for pair in new_joining_fields]
+                    
                     # Perform the join
                     joined_df = self._perform_join(
                         left_df, 
                         right_df, 
-                        new_joining_fields, 
+                        left_joining_fields, 
+                        right_joining_fields, 
                         join_type
                     )
                     
@@ -574,11 +593,16 @@ class JoinState(BaseState):
                     left_df = all_tables_data[left_table]
                     right_df = all_tables_data[right_table]
                     
+                    # Extract left and right joining fields for the join operation
+                    left_joining_fields = [pair[0] for pair in new_joining_fields]
+                    right_joining_fields = [pair[1] for pair in new_joining_fields]
+                    
                     # Perform the join
                     joined_df = self._perform_join(
                         left_df, 
                         right_df, 
-                        new_joining_fields, 
+                        left_joining_fields, 
+                        right_joining_fields, 
                         join_type
                     )
                     
@@ -641,23 +665,49 @@ class JoinState(BaseState):
             return False
             
     def _perform_join(self, left_df: pd.DataFrame, right_df: pd.DataFrame, 
-                     joining_fields: List[List[str]], join_type: str) -> pd.DataFrame:
-        """Perform the join operation"""
-        # Extract left and right columns
-        left_cols = [pair[0] for pair in joining_fields]
-        right_cols = [pair[1] for pair in joining_fields]
-        
-        # Perform the join
-        if join_type == "inner":
-            joined_df = pd.merge(left_df, right_df, left_on=left_cols, right_on=right_cols, how='inner')
-        elif join_type == "left":
-            joined_df = pd.merge(left_df, right_df, left_on=left_cols, right_on=right_cols, how='left')
-        elif join_type == "right":
-            joined_df = pd.merge(left_df, right_df, left_on=left_cols, right_on=right_cols, how='right')
-        else:  # outer
-            joined_df = pd.merge(left_df, right_df, left_on=left_cols, right_on=right_cols, how='outer')
+                     left_on: List[str], right_on: List[str], join_type: str) -> pd.DataFrame:
+        """Perform the join operation between two tables"""
+        try:
+            # Create copies of the dataframes to avoid modifying the originals
+            left_df_copy = left_df.copy()
+            right_df_copy = right_df.copy()
             
-        return joined_df
+            # Get list of common columns that aren't part of the join keys
+            left_cols = set(left_df_copy.columns)
+            right_cols = set(right_df_copy.columns)
+            common_cols = left_cols.intersection(right_cols)
+            
+            # Remove join columns from the common columns list if they have the same name
+            for l, r in zip(left_on, right_on):
+                if l == r and l in common_cols:
+                    common_cols.remove(l)
+            
+            # Rename all common columns in the right dataframe with a unique suffix
+            # This prevents any potential conflicts with existing _right or _right_right columns
+            if common_cols:
+                # Create a unique suffix based on the right table name or a random string
+                unique_suffix = f"_r_{str(uuid.uuid4())[:8]}"
+                
+                # Create a mapping of original column names to renamed column names
+                rename_map = {col: f"{col}{unique_suffix}" for col in common_cols}
+                
+                # Rename columns in the right dataframe
+                right_df_copy = right_df_copy.rename(columns=rename_map)
+            
+            # Perform the join with empty suffixes since we've already handled duplicates
+            merged_df = pd.merge(
+                left_df_copy, 
+                right_df_copy, 
+                left_on=left_on, 
+                right_on=right_on, 
+                how=join_type,
+                suffixes=('', '')  # No suffixes needed as we've already renamed
+            )
+            
+            return merged_df
+        except Exception as e:
+            logger.error(f"Error in _perform_join: {str(e)}")
+            raise e
         
     def _save_join_to_db(self, left_table: str, right_table: str, join_type: str, 
                          joining_fields: List[List[str]], result_table: str, 
@@ -745,15 +795,25 @@ class JoinState(BaseState):
             
             for i, join in enumerate(join_history):
                 self.view.display_markdown(f"**Join {i+1}:**")
-                self.view.display_markdown(f"- Left Table: {join['left_table']}")
-                self.view.display_markdown(f"- Right Table: {join['right_table']}")
-                self.view.display_markdown(f"- Join Type: {join['join_type']}")
+                self.view.display_markdown(f"- Left Table: {join.get('left_table', 'Unknown')}")
+                self.view.display_markdown(f"- Right Table: {join.get('right_table', 'Unknown')}")
+                self.view.display_markdown(f"- Join Type: {join.get('join_type', 'inner')}")
                 self.view.display_markdown("- Join Conditions:")
                 
-                for field_pair in join['joining_fields']:
-                    self.view.display_markdown(f"  - {field_pair[0]} = {field_pair[1]}")
+                # Handle different formats of joining_fields
+                joining_fields = join.get('joining_fields', [])
+                if isinstance(joining_fields, list):
+                    for field_pair in joining_fields:
+                        if isinstance(field_pair, list) and len(field_pair) >= 2:
+                            self.view.display_markdown(f"  - {field_pair[0]} = {field_pair[1]}")
                 
-                self.view.display_markdown(f"- Result: {join['result_table']} ({join['result_shape'][0]} rows × {join['result_shape'][1]} columns)")
+                # Display result information if available
+                result_table = join.get('result_table')
+                result_shape = join.get('result_shape')
+                if result_table:
+                    shape_info = f" ({result_shape[0]} rows × {result_shape[1]} columns)" if result_shape else ""
+                    self.view.display_markdown(f"- Result: {result_table}{shape_info}")
+                
                 self.view.display_markdown("---")
             
             # Display final table
@@ -766,19 +826,46 @@ class JoinState(BaseState):
             # Create state summary
             self._create_state_summary(final_table_name, final_table, join_history)
             
-            # Show proceed button
+            # Get problem type from mapping summary
+            mapping_summary = self.session.get('mapping_summary', {})
+            problem_type = mapping_summary.get('confirmed_mapping', {}).get('problem_type', '').lower()
+            
+            # Show proceed button with dynamic text based on problem type
             self.view.display_markdown("---")
-            if self.view.display_button("▶️ Proceed to Next Step"):
+            
+            button_text = "▶️ Proceed to Next Step"
+            next_state = "next"
+            
+            # Customize button text based on problem type
+            if problem_type == 'clustering':
+                button_text = "▶️ Proceed to Clustering"
+                next_state = "clustering"
+            elif problem_type == 'classification':
+                button_text = "▶️ Proceed to Classification"
+                next_state = "classification"
+            elif problem_type == 'regression':
+                button_text = "▶️ Proceed to Regression"
+                next_state = "regression"
+            elif problem_type == 'forecasting':
+                button_text = "▶️ Proceed to Forecasting"
+                next_state = "forecasting"
+            elif problem_type == 'recommendation':
+                button_text = "▶️ Proceed to Recommendation"
+                next_state = "recommendation"
+            
+            if self.view.display_button(button_text):
                 self.session.set('join_complete', True)
                 self.session.set('final_table_name', final_joined_table_name)
                 self.session.set('final_table', final_table)
+                self.session.set('next_state', next_state)
                 return True
                 
             return False
             
         except Exception as e:
+            logger.error(f"Error showing final summary: {str(e)}")
             self.view.show_message(f"Error showing final summary: {str(e)}", "error")
-        return False
+            return False
     
     def _create_state_summary(self, final_table_name: str, final_table: pd.DataFrame, join_history: List[Dict[str, Any]]) -> None:
         """Create a summary of the join state for display in the next state"""
@@ -865,4 +952,197 @@ class JoinState(BaseState):
     def _show_state_summary(self) -> None:
         """Show state summary when already complete"""
         summary = self.session.get("step_4_summary", "Join process complete.")
-        self.view.show_message(summary, "success") 
+        self.view.show_message(summary, "success")
+
+    def _handle_single_table_case(self) -> bool:
+        """Handle the case where only one table is uploaded"""
+        try:
+            # Get the single table name and data
+            tables_data = self.session.get('tables_data', {})
+            table_name = list(tables_data.keys())[0]
+            table_data = tables_data[table_name]
+            
+            # Get the aggregation summary to find the correct table name
+            session_id = self.session.get('session_id')
+            aggregation_summary = self._fetch_aggregation_table_name(session_id, table_name)
+            
+            # Use the aggregated table name from the summary if available
+            if aggregation_summary and 'aggregated_table_name' in aggregation_summary:
+                final_table_name = aggregation_summary['aggregated_table_name']
+            else:
+                # Create a standardized final table name based on session ID
+                short_session = session_id.split('-')[0] if session_id else 'single'
+                final_table_name = f"single_table_{short_session}"
+            
+            # Display header
+            self.view.display_subheader("Join Process")
+            
+            # Display message about single table
+            self.view.display_markdown("**Single Table Detected**")
+            self.view.display_markdown("Only one table was uploaded, so no join operations are needed.")
+            self.view.display_markdown("The workflow will proceed with the existing table.")
+            
+            # Display table info
+            self.view.display_markdown("---")
+            self.view.display_markdown("**Table Information:**")
+            self.view.display_markdown(f"**Name:** {table_name}")
+            self.view.display_markdown(f"**Final Table Name:** {final_table_name}")
+            self.view.display_markdown(f"**Shape:** {table_data.shape[0]} rows × {table_data.shape[1]} columns")
+            self.view.display_markdown("**Preview:**")
+            self.view.display_dataframe(table_data.head(5))
+            
+            # Create a simplified join history
+            join_history = [{
+                "message": "No join operations needed - single table workflow",
+                "table_name": table_name,
+                "final_table_name": final_table_name
+            }]
+            
+            # Create state summary
+            self._create_single_table_summary(table_name, final_table_name, table_data)
+            
+            # Get problem type from mapping summary
+            mapping_summary = self.session.get('mapping_summary', {})
+            problem_type = mapping_summary.get('confirmed_mapping', {}).get('problem_type', '').lower()
+            
+            # Show proceed button with dynamic text based on problem type
+            self.view.display_markdown("---")
+            
+            button_text = "▶️ Proceed to Next Step"
+            next_state = "next"
+            
+            # Customize button text based on problem type
+            if problem_type == 'clustering':
+                button_text = "▶️ Proceed to Clustering"
+                next_state = "clustering"
+            elif problem_type == 'classification':
+                button_text = "▶️ Proceed to Classification"
+                next_state = "classification"
+            elif problem_type == 'regression':
+                button_text = "▶️ Proceed to Regression"
+                next_state = "regression"
+            elif problem_type == 'forecasting':
+                button_text = "▶️ Proceed to Forecasting"
+                next_state = "forecasting"
+            elif problem_type == 'recommendation':
+                button_text = "▶️ Proceed to Recommendation"
+                next_state = "recommendation"
+            
+            if self.view.display_button(button_text):
+                self.session.set('join_complete', True)
+                self.session.set('final_table_name', final_table_name)
+                self.session.set('final_table', table_data)
+                self.session.set('next_state', next_state)
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error handling single table case: {str(e)}")
+            self.view.show_message(f"Error handling single table case: {str(e)}", "error")
+            return False
+
+    def _fetch_aggregation_table_name(self, session_id: str, table_name: str) -> Dict:
+        """Fetch aggregated table name from aggregation summary"""
+        try:
+            # Connect to database
+            with sqlite3.connect(self.db.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Query the aggregation_summary table
+                cursor.execute(
+                    """
+                    SELECT * FROM aggregation_summary 
+                    WHERE session_id = ? AND table_name = ?
+                    ORDER BY created_at DESC LIMIT 1
+                    """,
+                    (session_id, table_name)
+                )
+                
+                result = cursor.fetchone()
+                
+                if result:
+                    # Convert to dictionary
+                    columns = [col[0] for col in cursor.description]
+                    summary = {columns[i]: result[i] for i in range(len(columns))}
+                    return summary
+                
+                return {}
+                
+        except Exception as e:
+            logger.error(f"Error fetching aggregation table name: {str(e)}")
+            return {}
+
+    def _create_single_table_summary(self, table_name: str, final_table_name: str, table_data: pd.DataFrame) -> None:
+        """Create a summary for the single table case"""
+        try:
+            session_id = self.session.get('session_id')
+            
+            summary = f"### Step 4: Table Joins\n\n"
+            summary += "**No join operations needed - single table workflow**\n\n"
+            summary += f"**Original Table:** {table_name}\n"
+            summary += f"**Final Table:** {final_table_name}\n"
+            summary += f"**Shape:** {table_data.shape[0]} rows × {table_data.shape[1]} columns\n\n"
+            
+            # Store the summary in the session
+            self.session.set("step_4_summary", summary)
+            self.session.set("final_joined_table_name", final_table_name)
+            
+            # Save to database
+            with sqlite3.connect(self.db.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Create join_summary table if it doesn't exist
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS join_summary (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id TEXT,
+                        summary TEXT,
+                        final_table_name TEXT,
+                        join_history TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # Check if a summary already exists
+                cursor.execute(
+                    "SELECT id FROM join_summary WHERE session_id = ?",
+                    (session_id,)
+                )
+                existing = cursor.fetchone()
+                
+                # Create a simplified join history
+                join_history = [{
+                    "message": "No join operations needed - single table workflow",
+                    "table_name": table_name,
+                    "final_table_name": final_table_name
+                }]
+                
+                if existing:
+                    # Update existing summary
+                    cursor.execute(
+                        "UPDATE join_summary SET summary = ?, final_table_name = ?, join_history = ? WHERE session_id = ?",
+                        (summary, final_table_name, json.dumps(join_history), session_id)
+                    )
+                else:
+                    # Insert new summary
+                    cursor.execute(
+                        "INSERT INTO join_summary (session_id, summary, final_table_name, join_history) VALUES (?, ?, ?, ?)",
+                        (session_id, summary, final_table_name, json.dumps(join_history))
+                    )
+                
+                # Make sure the final table is available in the database
+                # If it's not already there, save it
+                try:
+
+                    table_data_copy = table_data
+                    # Save to database with the final table name
+                    table_data_copy.to_sql(final_table_name, conn, if_exists='replace', index=False)
+                    print(f">>> Saved final table as {final_table_name}")
+                except Exception as e:
+                    print(f">>> Error saving final table: {str(e)}")
+                
+                conn.commit()
+                
+        except Exception as e:
+            logger.error(f"Error creating single table summary: {str(e)}") 

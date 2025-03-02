@@ -78,3 +78,6 @@ pip-wheel-metadata/
 #model
 models/
 catboost_info/
+
+#temp
+*.ipynb

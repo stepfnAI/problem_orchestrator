@@ -526,38 +526,49 @@ class AggregationState:
                     "error": "No groupby columns found"
                 }
             
-            # Create a dictionary to map pandas aggregation functions
+            # Create a dictionary to map pandas aggregation functions with proper naming
             agg_function_map = {
                 'Min': 'min',
                 'Max': 'max',
                 'Sum': 'sum',
                 'Mean': 'mean',
                 'Median': 'median',
-                'Mode': lambda x: x.mode().iloc[0] if not x.mode().empty else None,
-                'Unique Count': lambda x: x.nunique(),
-                'Last Value': lambda x: x.iloc[-1] if len(x) > 0 else None
+                'Mode': 'mode',  # We'll handle this specially
+                'Unique Count': 'nunique',  # Use pandas nunique directly
+                'Last Value': 'last'  # We'll handle this specially
             }
             
             # Create the aggregation dictionary for pandas
             agg_dict = {}
             for feature, methods in selected_methods.items():
-                # Convert method names to lowercase pandas function names
-                agg_dict[feature] = [agg_function_map.get(method, method.lower()) for method in methods]
+                for method in methods:
+                    # Get the pandas function name
+                    pandas_func = agg_function_map.get(method, method.lower())
+                    
+                    # Create a column name for this aggregation
+                    col_name = f"{feature}_{method.lower().replace(' ', '_')}"
+                    
+                    # Add to aggregation dictionary with explicit naming
+                    if method == 'Mode':
+                        # Handle mode specially
+                        agg_dict[col_name] = pd.NamedAgg(column=feature, aggfunc=lambda x: x.mode().iloc[0] if not x.mode().empty else None)
+                    elif method == 'Last Value':
+                        # Handle last value specially
+                        agg_dict[col_name] = pd.NamedAgg(column=feature, aggfunc=lambda x: x.iloc[-1] if len(x) > 0 else None)
+                    else:
+                        # Standard aggregation
+                        agg_dict[col_name] = pd.NamedAgg(column=feature, aggfunc=pandas_func)
             
             print(f">>> Aggregation dictionary: {agg_dict}")
             
             # Group by the specified columns and apply the aggregation
             grouped = table_data.groupby(groupby_cols)
             
-            # Apply the aggregation methods
-            aggregated_data = grouped.agg(agg_dict)
+            # Apply the aggregation methods with named aggregations
+            aggregated_data = grouped.agg(**agg_dict)
             
             # Reset the index to make the groupby columns regular columns again
             aggregated_data = aggregated_data.reset_index()
-            
-            # Flatten the column names if they're MultiIndex
-            if isinstance(aggregated_data.columns, pd.MultiIndex):
-                aggregated_data.columns = [f"{col[0]}_{col[1]}" if col[1] else col[0] for col in aggregated_data.columns]
             
             # Store the aggregated data in the session
             self.session.set(f"aggregated_data_{table_name}", aggregated_data)
@@ -576,7 +587,7 @@ class AggregationState:
             try:
                 with sqlite3.connect(self.db.db_path) as conn:
                     # Add session_id column to the dataframe
-                    aggregated_data['session_id'] = session_id
+                    # aggregated_data['session_id'] = session_id
                     
                     # Save to database
                     aggregated_data.to_sql(aggregated_table_name, conn, if_exists='replace', index=False)

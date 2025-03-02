@@ -76,7 +76,7 @@ class DatabaseConnector:
                     print(f"DB table name: {db_table_name}")  # Debug log
                     
                     # Add session_id to DataFrame
-                    df['session_id'] = session_id
+                    # df['session_id'] = session_id
                     
                     # Save DataFrame to database
                     df.to_sql(
@@ -235,7 +235,7 @@ class DatabaseConnector:
         """
         try:
             # Add session_id to DataFrame
-            df['session_id'] = session_id
+            # df['session_id'] = session_id
             
             # Create full table name with state prefix
             full_table_name = f"{state_name}_{table_name}"
@@ -280,16 +280,7 @@ class DatabaseConnector:
             return None
 
     def fetch_table(self, state_name: str, table_name: str, session_id: str) -> Optional[pd.DataFrame]:
-        """Fetch table data from database
-        
-        Args:
-            state_name (str): Name of the state (for table naming)
-            table_name (str): Original table name
-            session_id (str): Session identifier
-            
-        Returns:
-            Optional[pd.DataFrame]: Table data or None if not found
-        """
+        """Fetch table data from database"""
         try:
             # First get the actual table name from registry
             with sqlite3.connect(self.db_path) as conn:
@@ -306,9 +297,9 @@ class DatabaseConnector:
                     
                 db_table_name = result[0]
                 
-                # Now fetch the actual data
-                query = f"SELECT * FROM {db_table_name} WHERE session_id = ?"
-                df = pd.read_sql(query, conn, params=(session_id,))
+                # Now fetch the actual data without session_id filter
+                query = f"SELECT * FROM {db_table_name}"
+                df = pd.read_sql(query, conn)
                 
                 return df if not df.empty else None
                 

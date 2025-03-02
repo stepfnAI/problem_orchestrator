@@ -1,6 +1,6 @@
 from sfn_blueprint import Task, SFNValidateAndRetryAgent
-from clustering_agent.agents.clustering_strategy_selector import SFNClusterSelectionAgent
-from clustering_agent.config.model_config import DEFAULT_LLM_PROVIDER
+from orchestrator.agents.clustering_strategy_selector import SFNClusterSelectionAgent
+from orchestrator.config.model_config import DEFAULT_LLM_PROVIDER
 from typing import Dict
 import pandas as pd
 import numpy as np

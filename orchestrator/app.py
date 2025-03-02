@@ -14,6 +14,7 @@ from orchestrator.storage.db_connector import DatabaseConnector
 import uuid
 from orchestrator.states.aggregation_state import AggregationState
 from orchestrator.states.join_state import JoinState
+from orchestrator.states.problem_specific_state import ProblemSpecificState
 
 class Orchestrator:
     def __init__(self):
@@ -34,6 +35,7 @@ class Orchestrator:
         mapping_state = MappingState(self.session, self.view)
         aggregation_state = AggregationState(self.session, self.view)
         join_state = JoinState(self.session, self.view)
+        problem_specific_state = ProblemSpecificState(self.session, self.view)
         
         self.states = [
             {
@@ -59,8 +61,13 @@ class Orchestrator:
                 'name': 'Table Joining',
                 'description': 'Join tables based on mapping',
                 'class': join_state
+            },
+            {
+                'id': 'problem_specific',
+                'name': 'Problem-Specific Analysis',
+                'description': 'Execute problem-specific analysis based on problem type',
+                'class': problem_specific_state
             }
-            # Add more states as needed
         ]
         
         # Define workflow steps
@@ -69,8 +76,8 @@ class Orchestrator:
             {'id': 'mapping', 'name': 'Column Mapping'},
             {'id': 'aggregation', 'name': 'Data Aggregation'},
             {'id': 'join', 'name': 'Table Joining'},
-            {'id': 'model_setup', 'name': 'Model Setup'},
-            {'id': 'training', 'name': 'Training & Evaluation'}
+            {'id': 'problem_specific', 'name': 'Problem-Specific Analysis'},
+            {'id': 'results', 'name': 'Results & Insights'}
         ]
 
     def run(self):

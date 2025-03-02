@@ -365,13 +365,18 @@ class OnboardingState(BaseState):
             print(f"Tables: {[t['name'] for t in uploaded_tables]}")
             
             # Create summary dictionary with more details
+            # Store both versions of table names - with and without extensions
+            table_names_without_extension = [table['name'].split('.')[0] for table in uploaded_tables]
+            table_names_with_extension = [table['name'] for table in uploaded_tables]
+            
             summary = {
                 'num_tables': str(len(uploaded_tables)),
                 'problem_type': problem_type,
                 'target_column': target_column if target_column else "None",
                 'has_target': str(bool(target_column)),
                 'is_time_series': str(bool(is_time_series)) if is_time_series is not None else "None",
-                'table_names': json.dumps([table['name'] for table in uploaded_tables]),
+                'table_names': json.dumps(table_names_with_extension),  # Keep original names with extensions
+                'table_names_clean': json.dumps(table_names_without_extension),  # Also store clean names
                 'table_rows': json.dumps([table['rows'] for table in uploaded_tables]),
                 'table_columns': json.dumps([table['columns'] for table in uploaded_tables]),
                 'completion_time': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
