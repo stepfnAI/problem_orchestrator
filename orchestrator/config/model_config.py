@@ -38,5 +38,95 @@ MODEL_CONFIG = {
             "n": 1,
             "stop": None
         }
-    } 
+    },
+    "feature_suggester": {
+        "openai": {
+            "model": DEFAULT_LLM_MODEL,
+            "temperature": 0.3,
+            "max_tokens": 800,
+            "n": 1,
+            "stop": None
+        },
+    },
+    "recommendation_explainer": {
+        "openai": {
+            "model": DEFAULT_LLM_MODEL,
+            "temperature": 0.3,
+            "max_tokens": 800,
+            "n": 1,
+            "stop": None
+        }
+    },
+    "approach_selector": {
+        "openai": {
+            "model": DEFAULT_LLM_MODEL,
+            "temperature": 0.3,
+            "max_tokens": 800,
+            "n": 1,
+            "stop": None
+        }
+    },
+    "data_type_suggester": {
+        "openai": {
+            "model": DEFAULT_LLM_MODEL,
+            "temperature": 0.3,
+            "max_tokens": 1000,
+            "n": 1,
+            "stop": None
+        }
+    },
+    "code_generator": {
+        "openai": {
+        "model": DEFAULT_LLM_MODEL,
+        "temperature": 0.1,
+        "max_tokens": 2000,
+        "n": 1,
+        "stop": None
+    }
+    },
+    "categorical_feature_handler": {
+        "openai": {
+            "model": DEFAULT_LLM_MODEL,
+            "temperature": 0.3,
+            "max_tokens": 1000,
+            "n": 1,
+            "stop": None
+    }
+    },
+    "model_trainer": {
+        "openai": {
+            "model": DEFAULT_LLM_MODEL,
+            "temperature": 0.1,
+            "max_tokens": 2000,
+            "n": 1,
+            "stop": None
+        }
+    },
+    "model_selector": {
+        "openai": {
+            "model": DEFAULT_LLM_MODEL,
+            "temperature": 0.3,
+            "max_tokens": 1000,
+            "n": 1,
+        "stop": None
+    }
+    },
+    "data_splitter": {
+        "openai": {
+            "model": DEFAULT_LLM_MODEL,
+        "temperature": 0.1,
+        "max_tokens": 1000,
+        "n": 1,
+        "stop": None
+    }
+    },
+    "leakage_detector": {
+        "openai": {
+            "model": DEFAULT_LLM_MODEL,
+        "temperature": 0.1,
+        "max_tokens": 1000,
+        "n": 1,
+        "stop": None
+    }
+} 
 }

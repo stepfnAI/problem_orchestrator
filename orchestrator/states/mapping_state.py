@@ -80,12 +80,44 @@ class MappingState(BaseState):
             self.session.set('problem_type', summary['problem_type'])
             self.session.set('target_column', summary['target_column'])
             self.session.set('table_names', json.loads(summary['table_names']))
+            
+            # Store recommendation approach if available
+            if 'recommendation_approach' in summary and summary['recommendation_approach']:
+                self.session.set('recommendation_approach', summary['recommendation_approach'])
+                print(f">><<Loaded recommendation approach: {summary['recommendation_approach']}")
+            
+            # Store is_time_series if available
+            if 'is_time_series' in summary and summary['is_time_series']:
+                self.session.set('is_time_series', summary['is_time_series'] == 'True')
+            
             self.session.set('onboarding_summary', summary)
+            
+            # Update mandatory columns based on problem type and recommendation approach
+            self._update_mandatory_columns()
+            
             return True
             
         except Exception as e:
             self.view.show_message(f"Error fetching onboarding summary: {str(e)}", "error")
             return False
+            
+    def _update_mandatory_columns(self):
+        """Update mandatory columns based on problem type and recommendation approach"""
+        problem_type = self.session.get('problem_type')
+        
+        # If problem type is recommendation, check the approach
+        if problem_type == 'recommendation':
+            recommendation_approach = self.session.get('recommendation_approach')
+            print(f">><<Updating mandatory columns for recommendation approach: {recommendation_approach}")
+            
+            # If user-based approach, add 'id' to mandatory columns
+            if recommendation_approach == 'user_based':
+                self.MANDATORY_COLUMNS['recommendation'] = ['product_id', 'id']
+                print(">><<Added 'id' to mandatory columns for user-based recommendation")
+            else:
+                # For item-based or any other approach, keep only product_id
+                self.MANDATORY_COLUMNS['recommendation'] = ['product_id']
+                print(">><<Using default mandatory columns for recommendation")
             
     def _display_mapping_status(self):
         """Display current mapping status for all tables"""
@@ -420,10 +452,10 @@ class MappingState(BaseState):
                         prediction_level_info = prediction_level
                     else:
                         # Default to ID-only if not explicitly set
-                        prediction_level_info = 'Customer Level'
+                        prediction_level_info = 'ID Level'
                 else:
                     # If no product mapping, it's always ID-only
-                    prediction_level_info = 'Customer Level'
+                    prediction_level_info = 'ID Level'
             
             # Create a summary entry with enhanced information
             session_id = self.session.get('session_id')

@@ -55,11 +55,17 @@ class OnboardingState(BaseState):
                     self.session.set('time_series_complete', True)
                     self.session.set('is_time_series', False)  # Default to False for other problem types
         
-        # Step 5: Generate and save state summary
+        # Step 5: Handle problem-specific information if needed
+        if not self.session.get('problem_specific_info_complete'):
+            if not self._handle_problem_specific_info():
+                return False
+        
+        # Step 6: Generate and save state summary
         if (self.session.get('data_upload_complete') and 
             self.session.get('problem_statement_complete') and 
             self.session.get('target_column_complete') and
             self.session.get('time_series_complete') and
+            self.session.get('problem_specific_info_complete') and
             not self.session.get('summary_complete')):
             
             if not self._generate_state_summary():
@@ -70,6 +76,7 @@ class OnboardingState(BaseState):
             self.session.get('problem_statement_complete') and 
             self.session.get('target_column_complete') and
             self.session.get('time_series_complete') and
+            self.session.get('problem_specific_info_complete') and
             self.session.get('summary_complete')):
             
             self.view.display_subheader("✅ Onboarding Complete!")
@@ -89,6 +96,17 @@ class OnboardingState(BaseState):
             # Add time series information to summary if applicable
             if self.session.get('is_time_series') is not None:
                 summary_message += f"**Time Series Data:** {'Yes' if self.session.get('is_time_series') else 'No'}\n"
+            
+            # Add problem-specific information to summary if applicable
+            problem_type = self.session.get('problem_type')
+            if problem_type == 'recommendation' and self.session.get('recommendation_approach'):
+                approach_display_names = {
+                    "user_based": "User Collaborative Filtering",
+                    "item_based": "Item-Based Similarity"
+                }
+                approach = self.session.get('recommendation_approach')
+                display_name = approach_display_names.get(approach, approach)
+                summary_message += f"**Recommendation Approach:** {display_name}\n"
             
             self.view.show_message(summary_message, "info")
             
@@ -349,6 +367,61 @@ class OnboardingState(BaseState):
         
         return False
         
+    def _handle_problem_specific_info(self) -> bool:
+        """Handle problem-specific information collection based on problem type"""
+        problem_type = self.session.get('problem_type')
+        
+        # If it's a recommendation problem, collect recommendation approach
+        if problem_type == 'recommendation':
+            return self._handle_recommendation_approach()
+        
+        # For other problem types, no additional info needed yet
+        # This can be expanded in the future for other problem types
+        self.session.set('problem_specific_info_complete', True)
+        return True
+    
+    def _handle_recommendation_approach(self) -> bool:
+        """Handle recommendation approach selection"""
+        # Show current progress
+        uploaded_tables = self.session.get('uploaded_tables', [])
+        self.view.display_markdown("### 📊 Uploaded Data")
+        for idx, table in enumerate(uploaded_tables, 1):
+            self.view.display_markdown(f"{idx}. **{table['name']}** (Rows: {table['rows']:,}, Columns: {table['columns']})")
+        self.view.display_markdown(f"\n**Selected Problem Type**: Recommendation")
+        self.view.display_markdown("---")
+        
+        self.view.display_subheader("Recommendation Approach Selection")
+        
+        # Define approach display names
+        approach_display_names = {
+            "user_based": "User Collaborative Filtering",
+            "item_based": "Item-Based Similarity"
+        }
+        
+        self.view.display_markdown(
+            "Please select the recommendation approach you'd like to use:\n\n"
+            "- **User Collaborative Filtering**: Recommends items based on similar users' preferences\n"
+            "- **Item-Based Similarity**: Recommends items similar to those the user has interacted with"
+        )
+        
+        # Radio selection for recommendation approach
+        selected_approach_display = self.view.radio_select(
+            "Select recommendation approach:",
+            options=list(approach_display_names.values()),
+            key="recommendation_approach"
+        )
+        
+        # Map display name back to internal name
+        reverse_mapping = {v: k for k, v in approach_display_names.items()}
+        
+        if self.view.display_button("Confirm Approach"):
+            selected_approach = reverse_mapping.get(selected_approach_display)
+            self.session.set('recommendation_approach', selected_approach)
+            self.session.set('problem_specific_info_complete', True)
+            return True
+            
+        return False
+        
     def _generate_state_summary(self) -> bool:
         """Generate and save state summary"""
         try:
@@ -381,6 +454,10 @@ class OnboardingState(BaseState):
                 'table_columns': json.dumps([table['columns'] for table in uploaded_tables]),
                 'completion_time': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
             }
+            
+            # Add problem-specific information to summary
+            if problem_type == 'recommendation' and self.session.get('recommendation_approach'):
+                summary['recommendation_approach'] = self.session.get('recommendation_approach')
             
             # Save summary to database
             session_id = self.session.get('session_id')
@@ -432,6 +509,17 @@ class OnboardingState(BaseState):
         # Add time series information to summary if applicable
         if self.session.get('is_time_series') is not None:
             summary_message += f"**Time Series Data:** {'Yes' if self.session.get('is_time_series') else 'No'}\n"
+        
+        # Add problem-specific information to summary if applicable
+        problem_type = self.session.get('problem_type')
+        if problem_type == 'recommendation' and self.session.get('recommendation_approach'):
+            approach_display_names = {
+                "user_based": "User Collaborative Filtering",
+                "item_based": "Item-Based Similarity"
+            }
+            approach = self.session.get('recommendation_approach')
+            display_name = approach_display_names.get(approach, approach)
+            summary_message += f"**Recommendation Approach:** {display_name}\n"
         
         # Display the summary with success styling
         self.view.show_message(summary_message, "success") 

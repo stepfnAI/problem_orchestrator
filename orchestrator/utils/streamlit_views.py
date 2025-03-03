@@ -1,5 +1,5 @@
 from sfn_blueprint.views.streamlit_view import SFNStreamlitView
-from typing import Any, List, Optional, Dict
+from typing import Any, List, Optional, Dict, Union
 import streamlit as st
 import os
 from pathlib import Path
@@ -227,3 +227,65 @@ class StreamlitView(SFNStreamlitView):
         # Find index of default value if provided
         index = options.index(default) if default and default in options else 0
         return st.radio(label, options, index=index, key=key) 
+    
+
+    def slider(self, 
+              label: str, 
+              min_value: Union[int, float] = 0.0, 
+              max_value: Union[int, float] = 1.0, 
+              value: Union[int, float] = 0.5, 
+              step: Union[int, float] = 0.1,
+              help: Optional[str] = None,
+              key: Optional[str] = None) -> Union[int, float]:
+        """Display a slider widget
+        
+        Args:
+            label (str): Label for the slider
+            min_value (Union[int, float]): Minimum value allowed
+            max_value (Union[int, float]): Maximum value allowed
+            value (Union[int, float]): Default value
+            step (Union[int, float]): Step size for the slider
+            help (str, optional): Help text to display. Defaults to None.
+            key (str, optional): Unique key for the component
+            
+        Returns:
+            Union[int, float]: Selected value
+        """
+        # Ensure consistent types
+        if isinstance(min_value, int) and isinstance(max_value, int):
+            # Convert step to int if it's a whole number
+            if isinstance(step, float) and step.is_integer():
+                step = int(step)
+            # Convert value to int if it's a float with no decimal part
+            if isinstance(value, float) and value.is_integer():
+                value = int(value)
+        
+        return st.slider(
+            label=label,
+            min_value=min_value,
+            max_value=max_value,
+            value=value,
+            step=step,
+            help=help,
+            key=key
+        )
+    
+    def metric(self, 
+              label: str, 
+              value: str,
+              delta: Optional[str] = None,
+              help: Optional[str] = None) -> None:
+        """Display a metric value with optional delta and help text
+        
+        Args:
+            label (str): Metric label
+            value (str): Metric value to display
+            delta (str, optional): Delta value to display. Defaults to None.
+            help (str, optional): Help text to display. Defaults to None.
+        """
+        st.metric(
+            label=label,
+            value=value,
+            delta=delta,
+            help=help
+        ) 

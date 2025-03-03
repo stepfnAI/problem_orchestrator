@@ -49,9 +49,12 @@ class DatabaseConnector:
                     target_column TEXT,
                     has_target TEXT,
                     table_names TEXT,
+                    table_names_clean TEXT,
                     table_rows TEXT,
                     table_columns TEXT,
-                    completion_time TEXT
+                    completion_time TEXT,
+                    is_time_series TEXT,
+                    recommendation_approach TEXT
                 )
             """)
             
@@ -140,25 +143,26 @@ class DatabaseConnector:
                         table_rows TEXT,
                         table_columns TEXT,
                         completion_time TEXT,
+                        recommendation_approach TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
                 
-                # Check if is_time_series column exists, add it if not
+                # Check if recommendation_approach column exists, add it if not
                 cursor.execute(f"PRAGMA table_info({state_name}_summary)")
                 columns = [column[1] for column in cursor.fetchall()]
                 
-                if 'is_time_series' not in columns:
-                    print(f"Adding is_time_series column to {state_name}_summary table")
-                    cursor.execute(f"ALTER TABLE {state_name}_summary ADD COLUMN is_time_series TEXT")
+                if 'recommendation_approach' not in columns:
+                    print(f"Adding recommendation_approach column to {state_name}_summary table")
+                    cursor.execute(f"ALTER TABLE {state_name}_summary ADD COLUMN recommendation_approach TEXT")
                 
                 # Insert summary data
                 cursor.execute(
                     f"""
                     INSERT INTO {state_name}_summary 
                     (session_id, num_tables, problem_type, target_column, has_target, is_time_series, 
-                    table_names, table_rows, table_columns, completion_time)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    table_names, table_rows, table_columns, completion_time, recommendation_approach)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         session_id,
@@ -170,7 +174,8 @@ class DatabaseConnector:
                         summary.get('table_names', ''),
                         summary.get('table_rows', ''),
                         summary.get('table_columns', ''),
-                        summary.get('completion_time', '')
+                        summary.get('completion_time', ''),
+                        summary.get('recommendation_approach', '')
                     )
                 )
                 
@@ -444,4 +449,138 @@ class DatabaseConnector:
                 
         except Exception as e:
             print(f"Error resetting state data: {e}")
-            return False 
+            return False
+
+    def get_mapping_summary(self, session_id):
+        """
+        Get mapping summary for a session from the database.
+        
+        Args:
+            session_id (str): The session ID
+            
+        Returns:
+            dict: Mapping summary or None if not found
+        """
+        try:
+            import json
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # First try to get table-specific mappings
+                cursor.execute(
+                    "SELECT table_name, mappings FROM mappings_summary WHERE session_id = ? AND table_name != '_state_summary'",
+                    (session_id,)
+                )
+                results = cursor.fetchall()
+                
+                # If no table-specific mappings, try to get from state summary
+                if not results:
+                    cursor.execute(
+                        "SELECT mappings FROM mappings_summary WHERE session_id = ? AND table_name = '_state_summary'",
+                        (session_id,)
+                    )
+                    state_result = cursor.fetchone()
+                    
+                    if state_result:
+                        # Parse state summary mappings
+                        state_mappings = json.loads(state_result[0])
+                        
+                        # Extract any field mappings from state summary
+                        field_mappings = {}
+                        # Look for any key that might be a field mapping
+                        for key, value in state_mappings.items():
+                            if key not in ['tables_mapped', 'mandatory_columns_mapped', 'prediction_level', 
+                                          'has_product_mapping', 'problem_type', 'completion_time']:
+                                field_mappings[key] = value
+                        
+                        return field_mappings
+                    else:
+                        # No mappings found at all
+                        print("No mappings found in database")
+                        return None
+                else:
+                    # Combine mappings from all tables
+                    field_mappings = {}
+                    for table_name, mappings_json in results:
+                        table_mappings = json.loads(mappings_json)
+                        field_mappings.update(table_mappings)
+                    
+                    return field_mappings
+                    
+        except Exception as e:
+            print(f"Error getting mapping summary: {str(e)}")
+            return None
+
+    def get_onboarding_summary(self, session_id):
+        """
+        Get onboarding summary for a session from the database.
+        
+        Args:
+            session_id (str): The session ID
+            
+        Returns:
+            dict: Onboarding summary or None if not found
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT * FROM onboarding_summary WHERE session_id = ?",
+                    (session_id,)
+                )
+                row = cursor.fetchone()
+                
+                if row:
+                    columns = [desc[0] for desc in cursor.description]
+                    return dict(zip(columns, row))
+                return None
+                
+        except Exception as e:
+            print(f"Error getting onboarding summary: {str(e)}")
+            return None
+
+    def get_joined_dataframe(self, session_id):
+        """
+        Get the joined dataframe for a session from the database.
+        
+        Args:
+            session_id (str): The session ID
+            
+        Returns:
+            pd.DataFrame: Joined dataframe or None if not found
+        """
+        try:
+            import pandas as pd
+            import json
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # First try to get the final table name from join summary
+                cursor.execute(
+                    "SELECT final_table_name FROM join_summary WHERE session_id = ? ORDER BY created_at DESC LIMIT 1",
+                    (session_id,)
+                )
+                result = cursor.fetchone()
+                
+                if not result:
+                    print("No join summary found in database")
+                    return None
+                    
+                final_table_name = result[0]
+                print(f"Found final table name: {final_table_name}")
+                
+                # Load the final table data
+                df = pd.read_sql(f"SELECT * FROM {final_table_name}", conn)
+                
+                if df.empty:
+                    print("Final table is empty")
+                    return None
+                    
+                print(f"Loaded final table with shape: {df.shape}")
+                return df
+                
+        except Exception as e:
+            print(f"Error getting joined dataframe: {str(e)}")
+            return None 
