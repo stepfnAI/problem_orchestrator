@@ -142,7 +142,7 @@ class RecommendationOrchestrator:
             with sqlite3.connect(db.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT final_table_name FROM join_summary WHERE session_id = ? ORDER BY created_at DESC LIMIT 1",
+                    "SELECT final_table_name, final_mappings FROM join_summary WHERE session_id = ? ORDER BY created_at DESC LIMIT 1",
                     (session_id,)
                 )
                 result = cursor.fetchone()
@@ -152,7 +152,10 @@ class RecommendationOrchestrator:
                     return False
                     
                 final_table_name = result[0]
+                final_mappings_json = result[1]
+                print(f">><<Found final mappings in recommendation orchestrator: {final_mappings_json}")
                 logger.info(f"Found final table name: {final_table_name}")
+                logger.info(f"Found final mappings: {final_mappings_json}")
                 
                 # 2. Load the final table data
                 df = pd.read_sql(f"SELECT * FROM {final_table_name}", conn)
@@ -167,17 +170,46 @@ class RecommendationOrchestrator:
                 self.session.set('df', df)
                 self.session.set('final_table_name', final_table_name)
                 
-                # 3. Get field mappings using dedicated method
-                field_mappings = self._fetch_mappings_from_db()
-                
+                # 3. Load the final mappings if available
+                if final_mappings_json:
+                    try:
+                        field_mappings = json.loads(final_mappings_json)
+                        logger.info(f"Loaded field mappings from join summary: {field_mappings}")
+                        self.session.set('field_mappings', field_mappings)
+                    except Exception as e:
+                        logger.error(f"Error parsing final mappings: {str(e)}")
+                        # We'll try to get mappings from mapping summary as fallback
+                        field_mappings = None
+                else:
+                    field_mappings = None
+                    
+                # 4. If we couldn't get mappings from join summary, try mapping summary as fallback
                 if not field_mappings:
-                    self.view.show_message("❌ Could not retrieve field mappings", "error")
-                    return False
+                    # Try to get mappings from mapping summary
+                    cursor.execute(
+                        "SELECT mappings FROM mappings_summary WHERE session_id = ? AND table_name = '_final_mappings' ORDER BY created_at DESC LIMIT 1",
+                        (session_id,)
+                    )
+                    mapping_result = cursor.fetchone()
+                    
+                    if mapping_result:
+                        try:
+                            field_mappings = json.loads(mapping_result[0])
+                            logger.info(f"Loaded field mappings from mapping summary: {field_mappings}")
+                            self.session.set('field_mappings', field_mappings)
+                        except Exception as e:
+                            logger.error(f"Error parsing mappings from mapping summary: {str(e)}")
+                            field_mappings = None
                 
-                # 4. Store mappings in session
-                self.session.set('field_mappings', field_mappings)
+                # 5. If we still don't have mappings, try to get them from the original mapping state
+                if not field_mappings:
+                    field_mappings = self._fetch_mappings_from_db()
+                    
+                    if not field_mappings:
+                        self.view.show_message("❌ Could not retrieve field mappings", "error")
+                        return False
                 
-                # 5. Initialize feature metadata for recommendation
+                # 6. Initialize feature metadata for recommendation
                 self._initialize_feature_metadata(df)
                 
                 return True

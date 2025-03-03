@@ -15,7 +15,7 @@ class MappingState(BaseState):
         'regression': ['id'],
         'recommendation': ['product_id'],
         'clustering': ['id'],
-        'forecasting': ['timestamp']
+        'forecasting': ['timestamp','target']
     }
 
     def __init__(self, session_manager, view):

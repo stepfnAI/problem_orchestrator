@@ -138,7 +138,7 @@ class ClusteringOrchestrator:
             with sqlite3.connect(db.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT final_table_name FROM join_summary WHERE session_id = ? ORDER BY created_at DESC LIMIT 1",
+                    "SELECT final_table_name, final_mappings FROM join_summary WHERE session_id = ? ORDER BY created_at DESC LIMIT 1",
                     (session_id,)
                 )
                 result = cursor.fetchone()
@@ -148,7 +148,10 @@ class ClusteringOrchestrator:
                     return False
                     
                 final_table_name = result[0]
+                final_mappings_json = result[1]
+                print(f">><<Found final mappings in clustering orchestrator: {final_mappings_json}")
                 logger.info(f"Found final table name: {final_table_name}")
+                logger.info(f"Found final mappings: {final_mappings_json}")
                 
                 # 2. Load the final table data
                 df = pd.read_sql(f"SELECT * FROM {final_table_name}", conn)
@@ -159,19 +162,52 @@ class ClusteringOrchestrator:
                     
                 logger.info(f"Loaded final table with shape: {df.shape}")
                 
-                # 3. Get field mappings from mapping summary
-                cursor.execute(
-                    "SELECT mappings FROM mappings_summary WHERE session_id = ? ORDER BY created_at DESC LIMIT 1",
-                    (session_id,)
-                )
-                result = cursor.fetchone()
+                # 3. Load the final mappings if available
+                field_mappings = None
+                if final_mappings_json:
+                    try:
+                        field_mappings = json.loads(final_mappings_json)
+                        logger.info(f"Loaded field mappings from join summary: {field_mappings}")
+                    except Exception as e:
+                        logger.error(f"Error parsing final mappings: {str(e)}")
+                        # We'll try to get mappings from mapping summary as fallback
+                        field_mappings = None
                 
-                if not result:
-                    self.view.show_message("❌ No mapping summary found in database", "error")
-                    return False
+                # 4. If we couldn't get mappings from join summary, try mapping summary as fallback
+                if not field_mappings:
+                    # Try to get mappings from mapping summary
+                    cursor.execute(
+                        "SELECT mappings FROM mappings_summary WHERE session_id = ? AND table_name = '_final_mappings' ORDER BY created_at DESC LIMIT 1",
+                        (session_id,)
+                    )
+                    mapping_result = cursor.fetchone()
                     
-                field_mappings = json.loads(result[0])
-                logger.info(f"Loaded field mappings: {field_mappings}")
+                    if mapping_result:
+                        try:
+                            field_mappings = json.loads(mapping_result[0])
+                            logger.info(f"Loaded field mappings from mapping summary: {field_mappings}")
+                        except Exception as e:
+                            logger.error(f"Error parsing mappings from mapping summary: {str(e)}")
+                            field_mappings = None
+                
+                # 5. If we still don't have mappings, try to get from regular mapping summary
+                if not field_mappings:
+                    cursor.execute(
+                        "SELECT mappings FROM mappings_summary WHERE session_id = ? ORDER BY created_at DESC LIMIT 1",
+                        (session_id,)
+                    )
+                    result = cursor.fetchone()
+                    
+                    if result:
+                        try:
+                            field_mappings = json.loads(result[0])
+                            logger.info(f"Loaded field mappings from regular mapping summary: {field_mappings}")
+                        except Exception as e:
+                            logger.error(f"Error parsing regular mappings: {str(e)}")
+                            field_mappings = None
+                    else:
+                        self.view.show_message("❌ No mapping summary found in database", "error")
+                        return False
                 
                 # Ensure field_mappings has an 'id' field
                 if 'id' not in field_mappings:
@@ -189,20 +225,20 @@ class ClusteringOrchestrator:
                         field_mappings['id'] = df.columns[0]
                         logger.info(f"Using {df.columns[0]} as ID field (first column)")
                 
-                # 4. Store in session
+                # 6. Store in session
                 self.session.set('df', df)
                 self.session.set('field_mappings', field_mappings)
                 
-                # 5. Also store the final table name
+                # 7. Also store the final table name
                 self.session.set('final_table_name', final_table_name)
                 
-                # 6. Set df_aggregated (needed by step5_results_insights.py)
+                # 8. Set df_aggregated (needed by step5_results_insights.py)
                 self.session.set('df_aggregated', df)
                 
-                # 7. Also set raw_df which might be needed
+                # 9. Also set raw_df which might be needed
                 self.session.set('raw_df', df)
                 
-                # 8. Set up initial cluster mappings for each algorithm
+                # 10. Set up initial cluster mappings for each algorithm
                 # This is needed by step5_results_insights.py
                 for algorithm in ['kmeans', 'dbscan']:
                     if self.session.get(f'{algorithm}_cluster_mapping') is None:
@@ -213,7 +249,7 @@ class ClusteringOrchestrator:
                         })
                         self.session.set(f'{algorithm}_cluster_mapping', cluster_mapping)
                 
-                # 9. Set selected_model if not already set
+                # 11. Set selected_model if not already set
                 if self.session.get('selected_model') is None:
                     self.session.set('selected_model', 'kmeans')  # Default to kmeans
                 

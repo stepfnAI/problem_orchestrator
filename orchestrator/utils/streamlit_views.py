@@ -289,3 +289,29 @@ class StreamlitView(SFNStreamlitView):
             delta=delta,
             help=help
         ) 
+
+    def selectbox(self, 
+                 label: str, 
+                 options: List[Any], 
+                 index: int = 0, 
+                 key: Optional[str] = None,
+                 help: Optional[str] = None) -> Any:
+        """Display a selectbox widget
+        
+        Args:
+            label (str): Label for the selectbox
+            options (List[Any]): List of options to choose from
+            index (int, optional): Index of the default selected option. Defaults to 0.
+            key (str, optional): Unique key for the component. Defaults to None.
+            help (str, optional): Help text to display. Defaults to None.
+            
+        Returns:
+            Any: Selected option
+        """
+        return st.selectbox(
+            label=label,
+            options=options,
+            index=index,
+            key=key,
+            help=help
+        ) 

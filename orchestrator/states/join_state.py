@@ -20,8 +20,8 @@ class JoinState(BaseState):
         self.db = DatabaseConnector()
         self.join_agent = SFNJoinSuggestionAgent()
         
-    def execute(self):
-        """Execute the join workflow"""
+    def execute(self) -> bool:
+        """Execute the join state logic"""
         # Check if state is already complete
         if self.session.get('join_complete'):
             self._show_state_summary()  # Show summary if already complete
@@ -823,12 +823,43 @@ class JoinState(BaseState):
             self.view.display_markdown("**Preview:**")
             self.view.display_dataframe(final_table.head(5))
             
-            # Create state summary
-            self._create_state_summary(final_table_name, final_table, join_history)
+            # Save the final table to the database with the standardized name
+            try:
+                with sqlite3.connect(self.db.db_path) as conn:
+                    # Save the final table with the standardized name
+                    final_table.to_sql(final_joined_table_name, conn, if_exists='replace', index=False)
+                    print(f">>> Saved final joined table as {final_joined_table_name}")
+            except Exception as e:
+                print(f">>> Error saving final joined table: {str(e)}")
+            
+            # Create state summary with the standardized table name
+            self._create_state_summary(final_joined_table_name, final_table, join_history)
             
             # Get problem type from mapping summary
             mapping_summary = self.session.get('mapping_summary', {})
             problem_type = mapping_summary.get('confirmed_mapping', {}).get('problem_type', '').lower()
+            
+            # Store the final table name and data in session
+            self.session.set('final_table_name', final_joined_table_name)
+            self.session.set('final_table', final_table)
+            
+            # Check if we need to get final mappings
+            if not self.session.get('final_mappings_complete'):
+                # Set a flag to indicate we're ready for final mappings
+                self.session.set('ready_for_final_mappings', True)
+                
+                # Get final mappings for the joined table
+                mappings_result = self._get_final_mappings()
+                
+                if mappings_result is None:
+                    # Still waiting for user input on mappings
+                    return False
+                elif not mappings_result:
+                    # Error occurred
+                    return False
+                
+                # Mark final mappings as complete
+                self.session.set('final_mappings_complete', True)
             
             # Show proceed button with dynamic text based on problem type
             self.view.display_markdown("---")
@@ -855,8 +886,6 @@ class JoinState(BaseState):
             
             if self.view.display_button(button_text):
                 self.session.set('join_complete', True)
-                self.session.set('final_table_name', final_joined_table_name)
-                self.session.set('final_table', final_table)
                 self.session.set('next_state', next_state)
                 return True
                 
@@ -867,40 +896,20 @@ class JoinState(BaseState):
             self.view.show_message(f"Error showing final summary: {str(e)}", "error")
             return False
     
-    def _create_state_summary(self, final_table_name: str, final_table: pd.DataFrame, join_history: List[Dict[str, Any]]) -> None:
-        """Create a summary of the join state for display in the next state"""
+    def _create_state_summary(self, final_table_name: str, final_table: pd.DataFrame, join_history: List[Dict]) -> None:
+        """Create a summary of the join state"""
         try:
-            # Create a standardized final table name based on session ID to avoid long names
             session_id = self.session.get('session_id')
-            short_session = session_id.split('-')[0] if session_id else 'joined'
-            final_joined_table_name = f"joined_table_{short_session}"
             
             summary = f"### Step 4: Table Joins\n\n"
-            
-            # Add join history
-            summary += f"**Join Operations:** {len(join_history)}\n\n"
-            
-            for i, join in enumerate(join_history):
-                summary += f"**Join {i+1}:** {join['left_table']} {join['join_type']} join {join['right_table']}\n"
-                summary += f"- Join Keys: "
-                
-                join_keys = []
-                for field_pair in join['joining_fields']:
-                    join_keys.append(f"{field_pair[0]} = {field_pair[1]}")
-                
-                summary += ", ".join(join_keys) + "\n"
-            
-            summary += "\n"
-            
-            # Add final table info with cleaned name
-            summary += f"**Final Table:** {final_joined_table_name}\n"
-            summary += f"**Final Shape:** {final_table.shape[0]} rows × {final_table.shape[1]} columns\n\n"
+            summary += f"**Number of Join Operations:** {len(join_history)}\n"
+            summary += f"**Final Table:** {final_table_name}\n"
+            summary += f"**Shape:** {final_table.shape[0]} rows × {final_table.shape[1]} columns\n\n"
             
             # Store the summary in the session
             self.session.set("step_4_summary", summary)
-            self.session.set("final_joined_table_name", final_joined_table_name)
             
-            # Also save to database
+            # Save to database
             with sqlite3.connect(self.db.db_path) as conn:
                 cursor = conn.cursor()
                 
@@ -912,6 +921,7 @@ class JoinState(BaseState):
                         summary TEXT,
                         final_table_name TEXT,
                         join_history TEXT,
+                        final_mappings TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
@@ -927,22 +937,22 @@ class JoinState(BaseState):
                     # Update existing summary
                     cursor.execute(
                         "UPDATE join_summary SET summary = ?, final_table_name = ?, join_history = ? WHERE session_id = ?",
-                        (summary, final_joined_table_name, json.dumps(join_history), session_id)
+                        (summary, final_table_name, json.dumps(join_history), session_id)
                     )
                 else:
                     # Insert new summary
                     cursor.execute(
                         "INSERT INTO join_summary (session_id, summary, final_table_name, join_history) VALUES (?, ?, ?, ?)",
-                        (session_id, summary, final_joined_table_name, json.dumps(join_history))
+                        (session_id, summary, final_table_name, json.dumps(join_history))
                     )
                 
-                # Save the final joined table to a dedicated table in the database
+                # Make sure the final table is available in the database
                 try:
-                    # Create the final joined table in the database
-                    final_table.to_sql(final_joined_table_name, conn, if_exists='replace', index=False)
-                    print(f">>> Saved final joined table as {final_joined_table_name}")
+                    # Save to database with the final table name
+                    final_table.to_sql(final_table_name, conn, if_exists='replace', index=False)
+                    print(f">>> Saved final table as {final_table_name}")
                 except Exception as e:
-                    print(f">>> Error saving final joined table: {str(e)}")
+                    print(f">>> Error saving final table: {str(e)}")
                 
                 conn.commit()
                 
@@ -955,51 +965,67 @@ class JoinState(BaseState):
         self.view.show_message(summary, "success")
 
     def _handle_single_table_case(self) -> bool:
-        """Handle the case where only one table is uploaded"""
+        """Handle the case where we only have one table (no joins needed)"""
         try:
-            # Get the single table name and data
+            # Get the single table
             tables_data = self.session.get('tables_data', {})
+            if not tables_data:
+                self.view.show_message("❌ No tables data found", "error")
+                return False
+            
+            # Get the single table name and data
             table_name = list(tables_data.keys())[0]
             table_data = tables_data[table_name]
             
-            # Get the aggregation summary to find the correct table name
+            # Create a standardized final table name based on session ID
             session_id = self.session.get('session_id')
-            aggregation_summary = self._fetch_aggregation_table_name(session_id, table_name)
-            
-            # Use the aggregated table name from the summary if available
-            if aggregation_summary and 'aggregated_table_name' in aggregation_summary:
-                final_table_name = aggregation_summary['aggregated_table_name']
-            else:
-                # Create a standardized final table name based on session ID
-                short_session = session_id.split('-')[0] if session_id else 'single'
-                final_table_name = f"single_table_{short_session}"
+            short_session = session_id.split('-')[0] if session_id else 'single'
+            final_table_name = f"joined_table_{short_session}"
             
             # Display header
-            self.view.display_subheader("Join Process")
-            
-            # Display message about single table
-            self.view.display_markdown("**Single Table Detected**")
-            self.view.display_markdown("Only one table was uploaded, so no join operations are needed.")
-            self.view.display_markdown("The workflow will proceed with the existing table.")
+            self.view.display_header("Single Table Workflow")
+            self.view.display_markdown("Only one table is available, so no joins are needed.")
             
             # Display table info
-            self.view.display_markdown("---")
-            self.view.display_markdown("**Table Information:**")
-            self.view.display_markdown(f"**Name:** {table_name}")
-            self.view.display_markdown(f"**Final Table Name:** {final_table_name}")
+            self.view.display_subheader("Table Information")
+            self.view.display_markdown(f"**Table Name:** {table_name}")
             self.view.display_markdown(f"**Shape:** {table_data.shape[0]} rows × {table_data.shape[1]} columns")
             self.view.display_markdown("**Preview:**")
             self.view.display_dataframe(table_data.head(5))
             
-            # Create a simplified join history
-            join_history = [{
-                "message": "No join operations needed - single table workflow",
-                "table_name": table_name,
-                "final_table_name": final_table_name
-            }]
-            
-            # Create state summary
+            # Create a summary for the single table case
             self._create_single_table_summary(table_name, final_table_name, table_data)
+            
+            # Store the table in the session as if it was a joined table
+            available_tables = [final_table_name]
+            joined_tables = {final_table_name: table_data}
+            
+            self.session.set('available_tables', available_tables)
+            self.session.set('joined_tables', joined_tables)
+            self.session.set('final_table_name', final_table_name)
+            self.session.set('final_table', table_data)
+            
+            # Create an empty join history
+            join_history = []
+            self.session.set('join_history', join_history)
+            
+            # Check if we need to get final mappings
+            if not self.session.get('final_mappings_complete'):
+                # Set a flag to indicate we're ready for final mappings
+                self.session.set('ready_for_final_mappings', True)
+                
+                # Get final mappings for the single table
+                mappings_result = self._get_final_mappings()
+                
+                if mappings_result is None:
+                    # Still waiting for user input on mappings
+                    return False
+                elif not mappings_result:
+                    # Error occurred
+                    return False
+                
+                # Mark final mappings as complete
+                self.session.set('final_mappings_complete', True)
             
             # Get problem type from mapping summary
             mapping_summary = self.session.get('mapping_summary', {})
@@ -1030,8 +1056,6 @@ class JoinState(BaseState):
             
             if self.view.display_button(button_text):
                 self.session.set('join_complete', True)
-                self.session.set('final_table_name', final_table_name)
-                self.session.set('final_table', table_data)
                 self.session.set('next_state', next_state)
                 return True
             
@@ -1100,6 +1124,7 @@ class JoinState(BaseState):
                         summary TEXT,
                         final_table_name TEXT,
                         join_history TEXT,
+                        final_mappings TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
@@ -1134,7 +1159,6 @@ class JoinState(BaseState):
                 # Make sure the final table is available in the database
                 # If it's not already there, save it
                 try:
-
                     table_data_copy = table_data
                     # Save to database with the final table name
                     table_data_copy.to_sql(final_table_name, conn, if_exists='replace', index=False)
@@ -1145,4 +1169,371 @@ class JoinState(BaseState):
                 conn.commit()
                 
         except Exception as e:
-            logger.error(f"Error creating single table summary: {str(e)}") 
+            logger.error(f"Error creating single table summary: {str(e)}")
+
+    def _get_final_mappings(self):
+        """
+        Get final mappings for the joined table based on problem type and requirements.
+        This method is called after join is complete to ensure mappings are accurate.
+        """
+        try:
+            # Get session ID and problem type
+            session_id = self.session.get('session_id')
+            problem_type = self.session.get('problem_type', '')
+            
+            # Get the final joined table
+            final_table_name = self.session.get('final_table_name')
+            if not final_table_name:
+                self.view.show_message("❌ Final table name not found", "error")
+                return False
+            
+            # Load the final table data
+            from orchestrator.storage.db_connector import DatabaseConnector
+            import sqlite3
+            import pandas as pd
+            
+            db = DatabaseConnector()
+            with sqlite3.connect(db.db_path) as conn:
+                # Get the final joined dataframe
+                df = pd.read_sql(f"SELECT * FROM {final_table_name}", conn)
+                
+                if df.empty:
+                    self.view.show_message("❌ Final joined table is empty", "error")
+                    return False
+                
+                # Get existing mappings from mapping state
+                existing_mappings = self._get_existing_mappings(session_id, conn)
+                
+                # Get onboarding summary for additional requirements
+                onboarding_summary = self._get_onboarding_summary(session_id, conn)
+                
+                # Determine mandatory and optional columns based on problem type and onboarding
+                mandatory_columns, optional_columns = self._get_mapping_requirements(problem_type, onboarding_summary)
+                
+                # Check which mandatory columns are missing from existing mappings
+                missing_mappings = []
+                for col in mandatory_columns:
+                    if col not in existing_mappings or not existing_mappings[col]:
+                        missing_mappings.append(col)
+            
+            # Always show the user interface for confirming mappings
+            # This ensures the user always gets a chance to review and confirm
+            return self._get_user_mappings(df, existing_mappings, missing_mappings, mandatory_columns, optional_columns)
+            
+        except Exception as e:
+            import traceback
+            print(f"Error getting final mappings: {str(e)}")
+            print(traceback.format_exc())
+            self.view.show_message(f"❌ Error getting final mappings: {str(e)}", "error")
+            return False
+
+    def _get_existing_mappings(self, session_id, conn):
+        """Get existing mappings from mapping state"""
+        try:
+            import json
+            cursor = conn.cursor()
+            
+            # First try to get table-specific mappings
+            cursor.execute(
+                "SELECT table_name, mappings FROM mappings_summary WHERE session_id = ? AND table_name != '_state_summary'",
+                (session_id,)
+            )
+            results = cursor.fetchall()
+            
+            # If no table-specific mappings, try to get from state summary
+            if not results:
+                cursor.execute(
+                    "SELECT mappings FROM mappings_summary WHERE session_id = ? AND table_name = '_state_summary'",
+                    (session_id,)
+                )
+                state_result = cursor.fetchone()
+                
+                if state_result:
+                    # Parse state summary mappings
+                    state_mappings = json.loads(state_result[0])
+                    
+                    # Extract any field mappings from state summary
+                    field_mappings = {}
+                    # Look for any key that might be a field mapping
+                    for key, value in state_mappings.items():
+                        if key not in ['tables_mapped', 'mandatory_columns_mapped', 'prediction_level', 
+                                      'has_product_mapping', 'problem_type', 'completion_time']:
+                            field_mappings[key] = value
+                    
+                    return field_mappings
+                else:
+                    # No mappings found at all
+                    return {}
+            else:
+                # Combine mappings from all tables
+                field_mappings = {}
+                for table_name, mappings_json in results:
+                    table_mappings = json.loads(mappings_json)
+                    field_mappings.update(table_mappings)
+                
+                return field_mappings
+                
+        except Exception as e:
+            print(f"Error getting existing mappings: {str(e)}")
+            return {}
+
+    def _get_onboarding_summary(self, session_id, conn):
+        """Get onboarding summary from database"""
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM onboarding_summary WHERE session_id = ?",
+                (session_id,)
+            )
+            row = cursor.fetchone()
+            
+            if row:
+                columns = [desc[0] for desc in cursor.description]
+                return dict(zip(columns, row))
+            return {}
+            
+        except Exception as e:
+            print(f"Error getting onboarding summary: {str(e)}")
+            return {}
+
+    def _get_mapping_requirements(self, problem_type, onboarding_summary):
+        """
+        Determine mandatory and optional columns based on problem type and onboarding summary
+        """
+        # Base mandatory columns by problem type
+        base_mandatory = {
+            'classification': ['id'],
+            'regression': ['id'],
+            'recommendation': ['product_id'],
+            'clustering': ['id'],
+            'forecasting': ['timestamp', 'target']
+        }
+        
+        # Get base mandatory columns for this problem type
+        mandatory_columns = base_mandatory.get(problem_type, [])
+        
+        # Add additional mandatory columns based on onboarding summary
+        if problem_type in ['regression', 'classification']:
+            # If has_target is true, target is mandatory
+            if onboarding_summary.get('has_target') == 'True':
+                if 'target' not in mandatory_columns:
+                    mandatory_columns.append('target')
+                
+            # If is_time_series is true, timestamp is mandatory
+            if onboarding_summary.get('is_time_series') == 'True':
+                if 'timestamp' not in mandatory_columns:
+                    mandatory_columns.append('timestamp')
+                
+            # If prediction_level is "ID+Product Level", product_id is mandatory
+            if onboarding_summary.get('prediction_level') == 'ID+Product Level':
+                if 'product_id' not in mandatory_columns:
+                    mandatory_columns.append('product_id')
+        
+        # For recommendation, if approach is user-based, id is mandatory
+        if problem_type == 'recommendation':
+            if onboarding_summary.get('recommendation_approach') == 'user_based':
+                if 'id' not in mandatory_columns:
+                    mandatory_columns.append('id')
+        
+        # Get optional columns based on problem type
+        optional_mapping = {
+            'classification': ['product_id', 'timestamp', 'revenue'],
+            'regression': ['product_id', 'timestamp', 'revenue'],
+            'recommendation': ['id', 'interaction_value', 'timestamp'],
+            'clustering': ['product_id', 'timestamp', 'revenue'],
+            'forecasting': ['product_id', 'id', 'revenue']
+        }
+        
+        optional_columns = optional_mapping.get(problem_type, [])
+        
+        return mandatory_columns, optional_columns
+
+    def _get_user_mappings(self, df, existing_mappings, missing_mappings, mandatory_columns, optional_columns):
+        """Get mappings from user for all columns, with existing mappings pre-filled"""
+        self.view.display_header("Final Column Mapping")
+        
+        # Explain to the user what's happening
+        self.view.display_markdown(
+            "Please review and confirm the column mappings for your selected problem type. "
+            "You can modify any mapping by selecting a different column from the dropdown."
+        )
+        
+        # Show the first few rows of the dataframe
+        self.view.display_subheader("Preview of Joined Data")
+        self.view.display_dataframe(df.head())
+        
+        # Create a form for user to select mappings
+        self.view.display_subheader("Map Columns")
+        
+        # For each mapping type, create a dropdown
+        updated_mappings = existing_mappings.copy()
+        columns = df.columns.tolist()
+        
+        # Combine mandatory and optional columns for display
+        all_mapping_types = mandatory_columns + [col for col in optional_columns if col not in mandatory_columns]
+        
+        for col_type in all_mapping_types:
+            # Create a friendly display name
+            display_name = col_type.replace('_', ' ').title()
+            
+            # Add (Required) to mandatory columns
+            if col_type in mandatory_columns:
+                display_name += " (Required)"
+            
+            # Create dropdown with None as first option
+            options = ["None"] + columns
+            default_idx = 0  # Default to None
+            
+            # If we have an existing mapping that's in the columns, use it as default
+            if col_type in existing_mappings and existing_mappings[col_type] in columns:
+                default_idx = columns.index(existing_mappings[col_type]) + 1  # +1 because "None" is first
+            
+            selected = self.view.selectbox(
+                f"Select column for {display_name}:",
+                options=options,
+                index=default_idx,
+                key=f"mapping_{col_type}"
+            )
+            
+            # Update mapping if not None
+            if selected != "None":
+                updated_mappings[col_type] = selected
+            else:
+                # If None is selected, remove any existing mapping
+                if col_type in updated_mappings:
+                    updated_mappings.pop(col_type)
+        
+        # Add a button to confirm mappings
+        if self.view.display_button("Confirm Mappings", key="confirm_final_mappings"):
+            # Check if all mandatory columns are mapped
+            missing = [col for col in mandatory_columns if col not in updated_mappings or not updated_mappings[col]]
+            
+            if missing:
+                # Show error for missing mandatory columns
+                missing_names = [col.replace('_', ' ').title() for col in missing]
+                self.view.show_message(
+                    f"❌ Please map all required columns: {', '.join(missing_names)}",
+                    "error"
+                )
+                return None  # Return None to keep UI state
+            else:
+                # Save the mappings and continue
+                session_id = self.session.get('session_id')
+                self._save_final_mappings(updated_mappings, session_id)
+                return True
+        
+        return None  # Return None to keep UI state
+
+    def _save_final_mappings(self, mappings, session_id):
+        """Save final mappings to database"""
+        try:
+            import json
+            import sqlite3
+            from orchestrator.storage.db_connector import DatabaseConnector
+            
+            db = DatabaseConnector()
+            
+            # Convert mappings to JSON
+            mappings_json = json.dumps(mappings)
+            
+            # Save to join_summary table
+            with sqlite3.connect(db.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # First, check if the join_summary table exists
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='join_summary'")
+                table_exists = cursor.fetchone() is not None
+                
+                if not table_exists:
+                    # Create the table with the final_mappings column
+                    cursor.execute("""
+                        CREATE TABLE join_summary (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            session_id TEXT,
+                            summary TEXT,
+                            final_table_name TEXT,
+                            join_history TEXT,
+                            final_mappings TEXT,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
+                    print("Created join_summary table with final_mappings column")
+                else:
+                    # Check if final_mappings column exists
+                    cursor.execute("PRAGMA table_info(join_summary)")
+                    columns = [column[1] for column in cursor.fetchall()]
+                    
+                    # Add the column if it doesn't exist
+                    if 'final_mappings' not in columns:
+                        cursor.execute("ALTER TABLE join_summary ADD COLUMN final_mappings TEXT")
+                        print("Added final_mappings column to join_summary table")
+                
+                # Check if there's an existing row for this session
+                cursor.execute(
+                    "SELECT id FROM join_summary WHERE session_id = ? ORDER BY created_at DESC LIMIT 1",
+                    (session_id,)
+                )
+                existing = cursor.fetchone()
+                
+                if existing:
+                    # Update existing row
+                    cursor.execute(
+                        """
+                        UPDATE join_summary 
+                        SET final_mappings = ? 
+                        WHERE id = ?
+                        """,
+                        (mappings_json, existing[0])
+                    )
+                    print(f"Updated final_mappings for join_summary id {existing[0]}")
+                else:
+                    # Insert a new row
+                    final_table_name = self.session.get('final_table_name', '')
+                    cursor.execute(
+                        """
+                        INSERT INTO join_summary 
+                        (session_id, final_mappings, final_table_name) 
+                        VALUES (?, ?, ?)
+                        """,
+                        (session_id, mappings_json, final_table_name)
+                    )
+                    print(f"Inserted new row in join_summary with final_mappings")
+                
+                conn.commit()
+            
+            # Also save to mapping_summary table for consistency
+            # Instead of using a non-existent method, use the existing table structure
+            with sqlite3.connect(db.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Create or update the mapping_summary entry with the final mappings
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS mappings_summary (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id TEXT,
+                        table_name TEXT,
+                        mappings TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # Save as a special '_final_mappings' entry
+                cursor.execute(
+                    """
+                    INSERT INTO mappings_summary (session_id, table_name, mappings)
+                    VALUES (?, '_final_mappings', ?)
+                    """,
+                    (session_id, mappings_json)
+                )
+                
+                conn.commit()
+            
+            self.view.show_message("✅ Final mappings saved successfully", "success")
+            return True
+            
+        except Exception as e:
+            import traceback
+            print(f"Error saving final mappings: {str(e)}")
+            print(traceback.format_exc())
+            self.view.show_message(f"❌ Error saving final mappings: {str(e)}", "error")
+            return False
