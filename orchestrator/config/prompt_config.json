@@ -110,5 +110,78 @@
                 "user_prompt_template": "Validate the following data type conversion instructions:\n{actual_output}\n\nFor now, always respond with JUST 'TRUE' on the first line and nothing else."
             }
         }
+    },
+    "code_generator": {
+        "openai": {
+            "main": {
+                "system_prompt": "You are a Python code generator specializing in data preprocessing and type conversion tasks. Your role is to generate clean, efficient, and safe Python code that can be executed directly.",
+                "user_prompt_template": "Generate Python code to implement the following data preprocessing instructions:\n\nInstructions:\n{instructions}\n\nDataFrame Information:\n{df_info}\n\nPrevious Error (if any): {error_message}\n\nRequirements:\n1. Code should work with a pandas DataFrame named 'df'\n2. Handle errors gracefully with try-except blocks\n3. Preserve original data where possible\n4. Follow pandas best practices\n5. No print statements or comments\n6. Return the modified DataFrame\n\nGenerate production-ready Python code that implements these instructions."
+            },
+            "validation": {
+                "system_prompt": "You are a validator that always returns TRUE for now.",
+                "user_prompt_template": "Validate the following generated code:\n{actual_output}\n\nFor now, always respond with JUST 'TRUE' on the first line and nothing else."
+            }
+        }
+    },
+    "categorical_feature_handler": {
+        "openai": {
+            "main": {
+                "system_prompt": "You are a feature engineering expert specializing in categorical variable encoding.",
+                "user_prompt_template": "Analyze and suggest encodings for the following categorical columns:\n\n{categorical_info}\n\nProvide encoding recommendations based on cardinality and data characteristics."
+            },
+            "validation": {
+                "system_prompt": "You are a data validation expert.",
+                "user_prompt_template": "Validate the following categorical encoding results:\n{validation_data}\n\nConfirm if the encodings are appropriate."
+            }
+        }
+    },
+    "data_splitter": {
+        "openai": {
+            "main": {
+                "system_prompt": "You are a Python expert specializing in data splitting strategies. Generate executable Python code that splits a pandas DataFrame into train, validation, and inference sets based on data characteristics. You must use the exact column names provided in the field mappings.",
+                "user_prompt_template": "Generate Python code to split the following dataset:\n\nData Info:\n- Total Records: {total_records}\n- Available Columns: {columns}\n- Field Mappings: {field_mappings}\n- Target Column: {target_column}\n- Date Column: {date_column}\n\nUser Instructions: {user_instructions}\n\nSplitting Rules:\n1. If time series data (date_column is not 'None'):\n   - Use last month for inference set\n   - Use previous {validation_window} months for validation\n   - Use remaining months for training\n\n2. If non-time series data:\n   - If missing target values exist in target column:\n     * Use records with missing target as inference set\n     * Split remaining records 80-20 for train-validation\n   - If no missing target values:\n     * Random 70-20-10 split for train-validation-inference\n\nNote: If user instructions are provided, they take precedence over default rules while maintaining data integrity.\n\nRequirements:\n1. Use EXACT column names from field_mappings\n2. Code must create these DataFrames: train_df, valid_df, infer_df\n3. No try-except blocks\n4. No print statements or comments\n5. Variables available: df, date_column, validation_window\n6. Write code only for conditions that apply - do not include empty else blocks or comments\n7. Use flat structure when possible instead of nested if-else\n8. IMPORTANT: Use ONLY these variable names for intermediate sets:\n   * 'train_set' for training data\n   * 'valid_set' (not validation_set) for validation data\n   * 'infer_set' for inference data\n9. At the end, assign:\n   * train_df = train_set\n   * valid_df = valid_set\n   * infer_df = infer_set\n\nProvide response in JSON format:\n{{\n    \"code\": \"<python code here>\",\n    \"explanation\": \"Explain ONLY the actual splitting approach used for this specific data. For time series data, describe the date ranges and their distribution. For static data, describe the splitting ratios and handling of missing targets if applicable. Focus on explaining what was actually done, not what could have been done.\"\n}}"
+            },
+            "validation": {
+                "system_prompt": "You are a validator that always returns TRUE for now.",
+                "user_prompt_template": "Validate the following data splitting results:\n{actual_output}\n\nFor now, always respond with JUST 'TRUE' on the first line and nothing else."
+            }
+        }
+    },
+    "model_trainer": {
+        "openai": {
+            "main": {
+                "system_prompt": "You are a Python ML expert specializing in training classification models. Generate clean, efficient code for training models.",
+                "user_prompt_template": "Generate Python code to train a {model_name} model with the following specifications:\n\nData Info:\n{data_info}\n\nColumn Information:\n- Target column: '{target_column}'\n- Date column: '{date_column}'\n- Available features: {available_features}\n\nRequirements:\n1. The code must create these EXACT variables:\n   a. metrics: dict containing:\n      * 'roc_auc': ROC AUC score\n      * 'precision': Precision score\n      * 'recall': Recall score\n      * 'f1': F1 score\n      * 'confusion_matrix': Confusion matrix as list of lists\n   b. model: The trained model object\n   c. training_features: list of column names used for training\n\n2. Code Guidelines:\n   - First check each feature's dtype using train_df[column].dtype\n   - Use ONLY features that are numeric (int, float) or boolean\n   - Skip any columns that are: object, datetime, period, or other non-numeric types\n   - Get target values directly using train_df[target_column] and valid_df[target_column]\n   - IMPORTANT: Check if target has at least two unique classes in both train and valid sets\n   - If not enough classes, raise ValueError with clear message\n   - Handle class imbalance using model's built-in parameters:\n     * XGBoost: scale_pos_weight\n     * LightGBM: is_unbalance=True\n     * Random Forest: class_weight='balanced'\n     * CatBoost: auto_class_weights=True\n   - Use train_df for training and valid_df for metrics calculation\n   - IMPORTANT: Save the trained model object in a variable named 'model'\n   - IMPORTANT: Save the list of used features in a variable named 'training_features'\n\n3. Available variables:\n   - train_df, valid_df: Training and validation DataFrames\n   - Model imports: XGBClassifier, LGBMClassifier, RandomForestClassifier, CatBoostClassifier\n   - Metric imports: roc_auc_score, precision_score, recall_score, f1_score, confusion_matrix\n   - pd, np: Standard modules\n\nProvide response in JSON format:\n{{\n    \"code\": \"<your code here>\",\n    \"explanation\": \"Brief explanation of the approach\"\n}}"
+            },
+            "validation": {
+                "system_prompt": "You are a validator that always returns TRUE for now.",
+                "user_prompt_template": "Validate the following model training results:\n{actual_output}\n\nFor now, always respond with JUST 'TRUE' on the first line and nothing else."
+            }
+        }
+    },
+    "model_selector": {
+        "openai": {
+            "main": {
+                "system_prompt": "You are an ML expert specializing in model selection and evaluation. Analyze model performance metrics and recommend the best model based on overall performance, considering accuracy, robustness, and efficiency.",
+                "user_prompt_template": "Analyze the following model results and recommend the best model:\n\nModel Results:\n{selection_info}\n\nCustom Instructions: {custom_instructions}\n\nProvide response in JSON format:\n{{\n    \"selected_model\": \"name of best model\",\n    \"explanation\": \"Detailed explanation of selection\",\n    \"comparison_summary\": \"Brief comparison of all models\",\n    \"model_rankings\": [\n        {{\"model\": \"model_name\", \"rank\": 1, \"key_strengths\": [\"strength1\", \"strength2\"]}},\n        ...\n    ]\n}}"
+            },
+            "validation": {
+                "system_prompt": "You are a validator that always returns TRUE for now.",
+                "user_prompt_template": "Validate the following model selection:\n{actual_output}\n\nFor now, always respond with JUST 'TRUE' on the first line and nothing else."
+            }
+        }
+    },
+    "leakage_detector": {
+        "openai": {
+            "main": {
+                "system_prompt": "You are a data scientist expert in identifying target leakage in machine learning features. Analyze the statistical findings and provide insights in a structured JSON format.",
+                "user_prompt_template": "Analyze the following statistical findings for potential target leakage:\n\nStatistical Metrics:\n{statistical_findings}\n\nField Information:\n{field_mappings}\n\nProvide your analysis in JSON format with the following structure:\n{{\n    \"insights\": {{\n        \"feature_name\": \"detailed explanation\",\n        ...\n    }},\n    \"reasoning\": {{\n        \"feature_name\": \"reasoning for flagging\",\n        ...\n    }},\n    \"additional_review\": [\"feature1\", \"feature2\"],\n    \"recommendations\": {{\n        \"high_risk\": [\"feature1\"],\n        \"medium_risk\": [\"feature2\"],\n        \"low_risk\": [\"feature3\"]\n    }}\n}}"
+            },
+            "validation": {
+                "system_prompt": "You are a validator that always returns TRUE for now.",
+                "user_prompt_template": "Validate the following leakage detection results:\n{actual_output}\n\nFor now, always respond with JUST 'TRUE' on the first line and nothing else."
+            }
+        }
     }
+
 }

@@ -1,7 +1,7 @@
 from sfn_blueprint import Task, SFNValidateAndRetryAgent
-from classification_agent.agents.model_training_agent import SFNModelTrainingAgent
-from classification_agent.config.model_config import DEFAULT_LLM_PROVIDER
-from classification_agent.utils.model_manager import ModelManager
+from orchestrator.agents.classif_model_training_agent import SFNModelTrainingAgent
+from orchestrator.config.model_config import DEFAULT_LLM_PROVIDER
+from orchestrator.utils.classif_model_manager import ModelManager
 import pandas as pd
 
 class ModelTraining:

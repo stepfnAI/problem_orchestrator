@@ -9,6 +9,7 @@ sys.path.append(str(project_root))
 from orchestrator.states.usecase_states.clustering.clustering_main_orchestrator import ClusteringOrchestrator
 from orchestrator.states.usecase_states.recommendation.recommendation_main_orchestrator import RecommendationOrchestrator
 from orchestrator.states.usecase_states.regression_forecasting.regression_main_orchestrator import RegressionApp
+from orchestrator.states.usecase_states.classification.classification_main_orchestrator import ClassificationApp
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +63,10 @@ class ProblemSpecificState:
             regression_app.run()
             return True
         elif problem_type == 'classification':
-            # TODO: Implement classification orchestrator
-            self.view.show_message("Classification workflow not yet implemented", "warning")
-            return False
+            logger.info("Transitioning to Classification workflow")
+            classification_app = ClassificationApp(self.session, self.view)
+            classification_app.run()
+            return True
         else:
             self.view.show_message(f"Unknown problem type: {problem_type}", "error")
             return False

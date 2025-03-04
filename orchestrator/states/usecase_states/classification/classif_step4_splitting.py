@@ -1,6 +1,6 @@
 from sfn_blueprint import Task, SFNValidateAndRetryAgent
-from classification_agent.agents.data_splitting_agent import SFNDataSplittingAgent
-from classification_agent.config.model_config import DEFAULT_LLM_PROVIDER
+from orchestrator.agents.classif_data_splitting_agent import SFNDataSplittingAgent
+from orchestrator.config.model_config import DEFAULT_LLM_PROVIDER
 
 class DataSplitting:
     def __init__(self, session_manager, view, validation_window=3):

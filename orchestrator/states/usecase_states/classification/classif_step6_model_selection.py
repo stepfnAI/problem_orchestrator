@@ -1,7 +1,7 @@
 from sfn_blueprint import Task, SFNValidateAndRetryAgent
-from classification_agent.agents.model_selection_agent import SFNModelSelectionAgent
-from classification_agent.utils.model_manager import ModelManager
-from classification_agent.config.model_config import DEFAULT_LLM_PROVIDER
+from orchestrator.agents.classif_model_selection_agent import SFNModelSelectionAgent
+from orchestrator.utils.classif_model_manager import ModelManager
+from orchestrator.config.model_config import DEFAULT_LLM_PROVIDER
 
 class ModelSelection:
     def __init__(self, session_manager, view):

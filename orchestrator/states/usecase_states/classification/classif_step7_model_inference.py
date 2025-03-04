@@ -1,5 +1,5 @@
 from sfn_blueprint import Task
-from classification_agent.utils.model_manager import ModelManager
+from orchestrator.utils.classif_model_manager import ModelManager
 import pandas as pd
 
 class ModelInference:

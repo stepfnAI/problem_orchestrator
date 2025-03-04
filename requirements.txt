@@ -26,3 +26,5 @@ streamlit>=1.39.0
 # Other specialized agents (add as needed)
 # agent1>=1.0.0
 # agent2>=2.0.0 
+lightgbm>=4.1.0
+catboost>=1.2.2

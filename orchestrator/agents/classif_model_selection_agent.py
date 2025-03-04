@@ -1,8 +1,8 @@
 from typing import Dict
 from sfn_blueprint import SFNAgent, Task, SFNAIHandler, SFNPromptManager
 import os
-from classification_agent.config.model_config import MODEL_CONFIG, DEFAULT_LLM_MODEL
-from classification_agent.utils.model_manager import ModelManager
+from orchestrator.config.model_config import MODEL_CONFIG, DEFAULT_LLM_MODEL,DEFAULT_LLM_PROVIDER
+from orchestrator.utils.classif_model_manager import ModelManager
 import json
 
 class SFNModelSelectionAgent(SFNAgent):
