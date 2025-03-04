@@ -1,5 +1,5 @@
 from sfn_blueprint import Task, SFNValidateAndRetryAgent
-from orchestrator.agents.classif_model_selection_agent import SFNModelSelectionAgent
+from classification_agent.agents.model_selection_agent import SFNModelSelectionAgent
 from orchestrator.utils.classif_model_manager import ModelManager
 from orchestrator.config.model_config import DEFAULT_LLM_PROVIDER
 

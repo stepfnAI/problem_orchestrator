@@ -1,5 +1,5 @@
 from sfn_blueprint import Task, SFNValidateAndRetryAgent
-from orchestrator.agents.classif_data_splitting_agent import SFNDataSplittingAgent
+from classification_agent.agents.data_splitting_agent import SFNDataSplittingAgent
 from orchestrator.config.model_config import DEFAULT_LLM_PROVIDER
 
 class DataSplitting:
