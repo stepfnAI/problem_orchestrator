@@ -6,34 +6,33 @@ from sfn_blueprint import Task
 from sfn_blueprint import SFNAIHandler
 import os
 from sfn_blueprint import SFNPromptManager
-from orchestrator.config.model_config import MODEL_CONFIG, DEFAULT_LLM_MODEL
+from classification_agent.config.model_config import MODEL_CONFIG, DEFAULT_LLM_MODEL
 import json
 import re
 import time
-from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, confusion_matrix, r2_score, mean_squared_error, mean_absolute_error
-from xgboost import XGBClassifier, XGBRegressor
-from lightgbm import LGBMClassifier, LGBMRegressor
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from catboost import CatBoostClassifier, CatBoostRegressor
-from prophet import Prophet
-from statsmodels.tsa.arima.model import ARIMA as SARIMAX
+from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, confusion_matrix
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+from sklearn.ensemble import RandomForestClassifier
+from catboost import CatBoostClassifier
 
 class SFNModelTrainingAgent(SFNAgent):
-    """Agent responsible for training models with appropriate analysis type"""
+    """Agent responsible for training a specific model with handling class imbalance"""
     
-    def __init__(self, llm_provider='openai', analysis_type="regression"):
+    def __init__(self, llm_provider='openai'):
         super().__init__(name="Model Training", role="ML Engineer")
         self.ai_handler = SFNAIHandler()
         self.llm_provider = llm_provider
-        self.analysis_type = analysis_type
         self.model_config = MODEL_CONFIG["model_trainer"]
-        self.max_retries = 3
+        self.max_retries = 3  # Add max retries parameter
         parent_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../'))
         prompt_config_path = os.path.join(parent_path, 'config', 'prompt_config.json')
         self.prompt_manager = SFNPromptManager(prompt_config_path)
 
     def execute_task(self, task: Task) -> Dict:
-        """Train a specific model and return metrics and model object"""
+        """
+        Train a specific model and return metrics and model object
+        """
         if not isinstance(task.data, dict):
             raise ValueError("Task data must be a dictionary")
         
@@ -52,18 +51,21 @@ class SFNModelTrainingAgent(SFNAgent):
             try:
                 if last_error:
                     print(f">>>>>> Retry attempt {attempt + 1}/{self.max_retries} for model training. Previous error: {str(last_error)}")
-                
-                # Get training code with appropriate parameters
+
+                # Get training code from LLM with error feedback
                 training_code, explanation = self._get_training_code(
                     task.data, 
                     previous_error=str(last_error) if last_error else None,
                     attempt=attempt + 1
                 )
-                
+
                 # Add debug print for cleaned code
                 print(">>> Generated Training Code:")
                 print(training_code)
                 print(">>> End Training Code")
+                
+                # Get target column from task data
+                target_column = task.data.get('target_column')
                 
                 # Safely filter out records with null target values
                 train_df = task.data['df_train'].copy()
@@ -76,13 +78,13 @@ class SFNModelTrainingAgent(SFNAgent):
                 else:
                     # Handle different types of null values
                     train_mask = (pd.notna(train_df[target_column]) & 
-                                (train_df[target_column] != '') & 
-                                (train_df[target_column] != 'None') & 
-                                (train_df[target_column].astype(str) != 'nan'))
+                                 (train_df[target_column] != '') & 
+                                 (train_df[target_column] != 'None') & 
+                                 (train_df[target_column].astype(str) != 'nan'))
                     valid_mask = (pd.notna(valid_df[target_column]) & 
-                                (valid_df[target_column] != '') & 
-                                (valid_df[target_column] != 'None') & 
-                                (valid_df[target_column].astype(str) != 'nan'))
+                                 (valid_df[target_column] != '') & 
+                                 (valid_df[target_column] != 'None') & 
+                                 (valid_df[target_column].astype(str) != 'nan'))
                     
                     train_df_filtered = train_df[train_mask].copy()
                     valid_df_filtered = valid_df[valid_mask].copy()
@@ -92,51 +94,32 @@ class SFNModelTrainingAgent(SFNAgent):
                     train_df_filtered = train_df
                     valid_df_filtered = valid_df
                 
-                # Create namespace for execution with appropriate models based on analysis type
+                # Create namespace for execution
                 globals_dict = {
                     'train_df': train_df_filtered,
                     'valid_df': valid_df_filtered,
                     'target_column': target_column,
                     'pd': pd,
                     'np': np,
-                    'r2_score': r2_score,
-                    'mean_squared_error': mean_squared_error,
-                    'mean_absolute_error': mean_absolute_error
+                    'XGBClassifier': XGBClassifier,
+                    'LGBMClassifier': LGBMClassifier,
+                    'RandomForestClassifier': RandomForestClassifier,
+                    'CatBoostClassifier': CatBoostClassifier,
+                    'roc_auc_score': roc_auc_score,
+                    'precision_score': precision_score,
+                    'recall_score': recall_score,
+                    'f1_score': f1_score,
+                    'confusion_matrix': confusion_matrix
                 }
-                
-                # Add appropriate models based on analysis type
-                if self.analysis_type == "forecasting":
-                    globals_dict.update({
-                        'Prophet': Prophet,
-                        'SARIMAX': SARIMAX,
-                        'XGBRegressor': XGBRegressor,
-                        'LGBMRegressor': LGBMRegressor
-                    })
-                else:  # regression
-                    globals_dict.update({
-                        'XGBRegressor': XGBRegressor,
-                        'LGBMRegressor': LGBMRegressor,
-                        'RandomForestRegressor': RandomForestRegressor,
-                        'CatBoostRegressor': CatBoostRegressor
-                    })
                 
                 # Execute with globals_dict
                 exec(training_code, globals_dict, globals_dict)
                 
                 print(f">>>>>> Successfully trained model on attempt {attempt + 1}")
-                model = globals_dict.get('model', None)
-                
-                # For SARIMAX, we need the fitted results
-                if model and task.data.get('model_name', '').lower() == 'sarimax':
-                    print(">>> Fitting SARIMAX model...")
-                    model = model.fit()  # Get the fitted results
-                    print(">>> SARIMAX model fitted")
-                
                 return {
                     'metrics': globals_dict.get('metrics', {}),
-                    'model': model,
+                    'model': globals_dict.get('model', None),
                     'training_features': globals_dict.get('training_features', []),
-                    'model_name': task.data.get('model_name'),
                     'records_info': {
                         'total_train': len(task.data['df_train']),
                         'used_train': len(train_df_filtered),
@@ -151,11 +134,15 @@ class SFNModelTrainingAgent(SFNAgent):
                     print(f">>>>>> All {self.max_retries} attempts failed. Returning error response.")
                     return {
                         'metrics': {
-                            'error': f'Training failed after {self.max_retries} attempts. Last error: {str(e)}'
+                            'error': f'Training failed after {self.max_retries} attempts. Last error: {str(e)}',
+                            'roc_auc': None,
+                            'precision': None,
+                            'recall': None,
+                            'f1': None,
+                            'confusion_matrix': None
                         },
                         'model': None,
                         'training_features': [],
-                        'model_name': task.data.get('model_name'),
                         'records_info': {
                             'total_train': len(task.data['df_train']),
                             'used_train': 0,
@@ -165,30 +152,24 @@ class SFNModelTrainingAgent(SFNAgent):
                     }
 
     def _get_training_code(self, data: Dict, previous_error=None, attempt=1) -> tuple[str, str]:
-        """Get model training code from LLM"""
-        # Determine target field name based on analysis type
-        target_field_name = "Forecasting Field" if self.analysis_type == "forecasting" else "Target"
-        
-        # Get data info with existing logic
+        """Get Python code for model training from LLM"""
         data_info = self._get_data_info(data)
         
-        # Prepare prompt parameters
-        prompt_params = {
-            "analysis_type": self.analysis_type,
-            "model_name": data.get('model_name', 'default'),
-            "target_field_name": target_field_name,
-            "target_column": data.get('target_column'),
-            "date_column": data.get('date_column'),
-            "available_features": data.get('available_features', list(data['df_train'].columns)),
-            "data_info": data_info
+        prompt_args = {
+            'model_name': data['model_name'],
+            'data_info': data_info,
+            'target_column': data['target_column'],
+            'date_column': data.get('date_column', 'billing_date'),
+            'available_features': list(data['df_train'].columns),
+            'categorical_features': [col for col in data['df_train'].select_dtypes(include=['object', 'category']).columns],
+            'numeric_features': [col for col in data['df_train'].select_dtypes(include=['int64', 'float64']).columns]
         }
         
-        # Get response from LLM
         system_prompt, user_prompt = self.prompt_manager.get_prompt(
             agent_type='model_trainer',
             llm_provider=self.llm_provider,
             prompt_type='main',
-            **prompt_params
+            **prompt_args
         )
 
         if previous_error and attempt > 1:
@@ -215,24 +196,20 @@ class SFNModelTrainingAgent(SFNAgent):
             train_df_with_target = train_df[train_mask]
             valid_df_with_target = valid_df[valid_mask]
             
-            # For regression, get target distribution statistics instead of value counts
+            # Safely compute target distribution with fallback
             try:
-                train_stats = {
-                    'mean': float(train_df_with_target[target_col].mean()),
-                    'std': float(train_df_with_target[target_col].std()),
-                    'min': float(train_df_with_target[target_col].min()),
-                    'max': float(train_df_with_target[target_col].max())
-                }
-                valid_stats = {
-                    'mean': float(valid_df_with_target[target_col].mean()),
-                    'std': float(valid_df_with_target[target_col].std()),
-                    'min': float(valid_df_with_target[target_col].min()),
-                    'max': float(valid_df_with_target[target_col].max())
-                }
+                train_dist = (train_df_with_target[target_col]
+                             .fillna('Unknown')
+                             .value_counts()
+                             .to_dict())
+                valid_dist = (valid_df_with_target[target_col]
+                             .fillna('Unknown')
+                             .value_counts()
+                             .to_dict())
             except:
                 # Fallback for target distribution
-                train_stats = {'Unknown': len(train_df_with_target)}
-                valid_stats = {'Unknown': len(valid_df_with_target)}
+                train_dist = {'Unknown': len(train_df_with_target)}
+                valid_dist = {'Unknown': len(valid_df_with_target)}
             
             # Get feature list excluding target column
             features = [col for col in train_df.columns if col != target_col]
@@ -247,8 +224,8 @@ class SFNModelTrainingAgent(SFNAgent):
             return {
                 'train_shape': train_df_with_target.shape,
                 'valid_shape': valid_df_with_target.shape,
-                'target_statistics_train': train_stats,
-                'target_statistics_valid': valid_stats,
+                'target_distribution_train': train_dist,
+                'target_distribution_valid': valid_dist,
                 'features': features,
                 'dtypes': dtypes_dict,
                 'column_mappings': {
@@ -266,8 +243,8 @@ class SFNModelTrainingAgent(SFNAgent):
             return {
                 'train_shape': train_df.shape,
                 'valid_shape': valid_df.shape,
-                'target_statistics_train': {'Unknown': len(train_df)},
-                'target_statistics_valid': {'Unknown': len(valid_df)},
+                'target_distribution_train': {'Unknown': len(train_df)},
+                'target_distribution_valid': {'Unknown': len(valid_df)},
                 'features': [col for col in train_df.columns if col != target_col],
                 'dtypes': {col: 'unknown' for col in train_df.columns},
                 'column_mappings': {

@@ -4,13 +4,13 @@ import numpy as np
 from sfn_blueprint import SFNAgent, Task
 
 class SFNLeakageDetectionAgent(SFNAgent):
-    """Agent responsible for detecting potential target leakage in regression features"""
+    """Agent responsible for detecting potential target leakage in features"""
     
     def __init__(self):
         super().__init__(name="Leakage Detection", role="Data Validator")
         # Thresholds for leakage detection
-        self.SEVERE_CORRELATION_THRESHOLD = 0.90  # Definite leakage
-        self.HIGH_CORRELATION_THRESHOLD = 0.80    # Suspicious, needs review
+        self.SEVERE_CORRELATION_THRESHOLD = 0.95  # Definite leakage
+        self.HIGH_CORRELATION_THRESHOLD = 0.85    # Suspicious, needs review
         self.HIGH_NULL_PERCENTAGE = 0.30          # High missing values threshold
         self.HIGH_CARDINALITY_RATIO = 0.90       # High unique values ratio
         
@@ -27,8 +27,8 @@ class SFNLeakageDetectionAgent(SFNAgent):
     def _analyze_leakage(self, df: pd.DataFrame, target_col: str) -> Dict:
         """Analyze features for leakage based on correlation, nulls, and cardinality"""
         findings = {
-            'severe_leakage': [],      # Features with very strong correlation
-            'suspicious_leakage': [],   # Features with strong correlation
+            'severe_leakage': [],      # Features with correlation > 0.95
+            'suspicious_leakage': [],   # Features with correlation 0.90-0.95
             'analysis': {},            # Detailed analysis per feature
             'recommendations': {
                 'remove': [],          # Features to definitely remove
@@ -93,26 +93,36 @@ class SFNLeakageDetectionAgent(SFNAgent):
                     'feature': column,
                     'reason': (
                         f"High correlation ({correlation:.3f}) with "
-                        f"high cardinality ratio ({unique_ratio:.2f}"
+                        f"high cardinality ratio ({unique_ratio:.2f})"
                     )
                 })
         
         return findings
 
     def _calculate_correlation(self, series1: pd.Series, series2: pd.Series) -> float:
-        """Calculate correlation between two series"""
+        """Calculate correlation between two series handling different data types"""
         try:
             # For numeric data
             if pd.api.types.is_numeric_dtype(series1) and pd.api.types.is_numeric_dtype(series2):
                 return series1.corr(series2)
             
-            # For non-numeric data, try to convert
-            try:
-                return pd.to_numeric(series1, errors='coerce').corr(
-                    pd.to_numeric(series2, errors='coerce')
-                )
-            except:
-                return 0.0
+            # For categorical data, convert to numeric if possible
+            elif pd.api.types.is_categorical_dtype(series1) or pd.api.types.is_categorical_dtype(series2):
+                try:
+                    return pd.to_numeric(series1, errors='coerce').corr(
+                        pd.to_numeric(series2, errors='coerce')
+                    )
+                except:
+                    return 0.0
+            
+            # For other types, try to convert to numeric
+            else:
+                try:
+                    return pd.to_numeric(series1, errors='coerce').corr(
+                        pd.to_numeric(series2, errors='coerce')
+                    )
+                except:
+                    return 0.0
                     
         except Exception as e:
             print(f"Error calculating correlation: {str(e)}")

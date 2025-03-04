@@ -1,5 +1,7 @@
 # Core dependencies
 sfn-aggregation-agent @ git+https://github.com/stepfnAI/aggregation_agent.git@main#egg=sfn_aggregation_agent
+sfn-regression-agent @ git+https://github.com/stepfnAI/regression_agent.git@main#egg=sfn_regression_agent
+
 sfn_blueprint==0.5.2
 sfn-llm-client==0.1.0
 
@@ -24,11 +26,3 @@ streamlit>=1.39.0
 # Other specialized agents (add as needed)
 # agent1>=1.0.0
 # agent2>=2.0.0 
-
-
-lightgbm>=4.1.0
-catboost>=1.2.2
-xgboost>=2.0.0
-prophet>=1.1.4
-statsmodels>=0.14.0  
-scikit-learn>=1.3.0 

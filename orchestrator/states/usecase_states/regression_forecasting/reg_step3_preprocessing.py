@@ -1,6 +1,6 @@
 from sfn_blueprint import Task, SFNValidateAndRetryAgent
-from orchestrator.agents.reg_categorical_feature_agent import SFNCategoricalFeatureAgent
-from orchestrator.agents.reg_leakage_detection_agent import SFNLeakageDetectionAgent
+from regression_agent.agents.categorical_feature_agent import SFNCategoricalFeatureAgent
+from regression_agent.agents.leakage_detection_agent import SFNLeakageDetectionAgent
 from orchestrator.config.model_config import DEFAULT_LLM_PROVIDER
 import pandas as pd
 

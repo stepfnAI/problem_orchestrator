@@ -3,7 +3,7 @@ import pandas as pd
 from sfn_blueprint import SFNAgent
 from sfn_blueprint import Task
 from sfn_blueprint import SFNPromptManager
-from orchestrator.config.model_config import MODEL_CONFIG, DEFAULT_LLM_PROVIDER
+from classification_agent.config.model_config import MODEL_CONFIG, DEFAULT_LLM_PROVIDER
 import os
 
 class SFNCategoricalFeatureAgent(SFNAgent):

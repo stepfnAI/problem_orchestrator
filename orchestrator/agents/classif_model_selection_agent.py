@@ -1,18 +1,17 @@
 from typing import Dict
 from sfn_blueprint import SFNAgent, Task, SFNAIHandler, SFNPromptManager
 import os
-from orchestrator.config.model_config import MODEL_CONFIG, DEFAULT_LLM_MODEL
-from orchestrator.utils.reg_model_manager import ModelManager
+from classification_agent.config.model_config import MODEL_CONFIG, DEFAULT_LLM_MODEL
+from classification_agent.utils.model_manager import ModelManager
 import json
 
 class SFNModelSelectionAgent(SFNAgent):
-    """Agent responsible for selecting the best model based on performance metrics"""
+    """Agent responsible for analyzing model performance and making recommendations"""
     
-    def __init__(self, llm_provider='openai', analysis_type="regression"):
-        super().__init__(name="Model Selection", role="ML Engineer")
+    def __init__(self, llm_provider='openai'):
+        super().__init__(name="Model Selection", role="ML Strategist")
         self.ai_handler = SFNAIHandler()
         self.llm_provider = llm_provider
-        self.analysis_type = analysis_type
         self.model_config = MODEL_CONFIG["model_selector"]
         parent_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../'))
         prompt_config_path = os.path.join(parent_path, 'config', 'prompt_config.json')
@@ -20,60 +19,54 @@ class SFNModelSelectionAgent(SFNAgent):
         self.model_manager = ModelManager()
 
     def execute_task(self, task: Task) -> Dict:
-        """Select best model based on performance metrics"""
+        """
+        Analyze model results and recommend the best model
+        
+        :param task: Task object containing:
+            - data: Dict with model_results from training step
+        :return: Dictionary with recommendation details
+        """
         if not isinstance(task.data, dict):
             raise ValueError("Task data must be a dictionary")
             
-        selection_info = task.data.get('selection_info')
-        if not selection_info:
-            raise ValueError("No model results provided for selection")
-            
-        # Get metrics guide based on analysis type
-        metrics_guide = self._get_metrics_guide()
+        model_results = task.data.get('model_results', {})
+        if not model_results:
+            raise ValueError("No model results found for analysis")
+
+        # Format model results for LLM
+        selection_info = self._format_model_results(model_results)
         
-        # Prepare prompt parameters
-        prompt_params = {
-            "analysis_type": self.analysis_type,
-            "selection_info": selection_info,
-            "metrics_guide": metrics_guide,
-            "custom_instructions": task.data.get('custom_instructions', '')
-        }
+        # Get recommendation from LLM
+        recommendation = self._get_recommendation(selection_info)
         
-        # Get response from LLM
+        return recommendation
+
+    def _format_model_results(self, model_results: Dict) -> str:
+        """Format model results for LLM consumption"""
+        formatted_info = "Model Performance Summary:\n\n"
+        
+        for model_name, results in model_results.items():
+            metrics = results.get('metrics', {})
+            formatted_info += f"Model: {model_name}\n"
+            formatted_info += f"- ROC AUC: {metrics.get('roc_auc', 'N/A')}\n"
+            formatted_info += f"- F1 Score: {metrics.get('f1', 'N/A')}\n"
+            formatted_info += f"- Precision: {metrics.get('precision', 'N/A')}\n"
+            formatted_info += f"- Recall: {metrics.get('recall', 'N/A')}\n\n"
+        
+        return formatted_info
+
+    def _get_recommendation(self, selection_info: str) -> Dict:
+        """Get model recommendation from LLM"""
         system_prompt, user_prompt = self.prompt_manager.get_prompt(
             agent_type='model_selector',
             llm_provider=self.llm_provider,
             prompt_type='main',
-            **prompt_params
+            selection_info=selection_info,
+            custom_instructions=""
         )
-        
+
         response = self._get_llm_response(system_prompt, user_prompt)
         return self._parse_llm_response(response)
-        
-    def _get_metrics_guide(self) -> str:
-        """Get appropriate metrics guide based on analysis type"""
-        if self.analysis_type == "forecasting":
-            return (
-                "For forecasting models:\n"
-                "- MAPE (Mean Absolute Percentage Error): Lower is better\n"
-                "- RMSE (Root Mean Square Error): Lower is better\n"
-                "- MAE (Mean Absolute Error): Lower is better\n"
-                "Consider:\n"
-                "- MAPE for relative error across different scales\n"
-                "- RMSE for penalizing larger errors\n"
-                "- MAE for absolute error magnitude"
-            )
-        else:  # regression
-            return (
-                "For regression models:\n"
-                "- R² Score: Higher is better (1.0 is perfect)\n"
-                "- MSE (Mean Squared Error): Lower is better\n"
-                "- MAE (Mean Absolute Error): Lower is better\n"
-                "Consider:\n"
-                "- R² for overall fit quality\n"
-                "- MSE for penalizing larger errors\n"
-                "- MAE for absolute error magnitude"
-            )
 
     def _get_llm_response(self, system_prompt: str, user_prompt: str):
         """Get response from LLM"""

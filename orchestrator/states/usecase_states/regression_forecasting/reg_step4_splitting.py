@@ -1,5 +1,5 @@
 from sfn_blueprint import Task, SFNValidateAndRetryAgent
-from orchestrator.agents.reg_data_splitting_agent import SFNDataSplittingAgent
+from regression_agent.agents.data_splitting_agent import SFNDataSplittingAgent
 from orchestrator.config.model_config import DEFAULT_LLM_PROVIDER
 import pandas as pd
 import numpy as np

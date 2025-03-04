@@ -1,5 +1,5 @@
 from sfn_blueprint import Task, SFNValidateAndRetryAgent
-from orchestrator.agents.reg_model_training_agent import SFNModelTrainingAgent
+from regression_agent.agents.model_training_agent import SFNModelTrainingAgent
 from orchestrator.config.model_config import DEFAULT_LLM_PROVIDER
 from orchestrator.utils.reg_model_manager import ModelManager
 import pandas as pd
