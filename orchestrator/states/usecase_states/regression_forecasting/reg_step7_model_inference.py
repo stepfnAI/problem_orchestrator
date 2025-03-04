@@ -9,9 +9,16 @@ class ModelInference:
         self.session = session_manager
         self.view = view
         self.model_manager = ModelManager()
-        # Default to 3 months if not specified or None, max 6 months
+        
+        # Convert forecast_periods to int and handle type conversion safely
         forecast_periods = self.session.get('forecast_periods')
-        self.forecast_periods = min(forecast_periods if forecast_periods is not None else 3, 6)
+        try:
+            if forecast_periods is not None:
+                forecast_periods = int(forecast_periods)
+            self.forecast_periods = min(forecast_periods if forecast_periods is not None else 3, 6)
+        except (ValueError, TypeError):
+            # Default to 3 if conversion fails
+            self.forecast_periods = 3
         
     def execute(self):
         """Execute model inference step"""
@@ -35,7 +42,7 @@ class ModelInference:
             return False
             
         # Get appropriate target column based on analysis type
-        target_column = self.mappings.get('forecasting_field' if is_forecasting else 'target')
+        target_column = 'target'
         
         # Get predictions
         with self.view.display_spinner('Generating predictions...'):
@@ -88,72 +95,86 @@ class ModelInference:
     def _generate_predictions(self, model_info: Dict, infer_df: pd.DataFrame, 
                             target_column: str, is_forecasting: bool) -> pd.Series:
         """Generate predictions using the selected model"""
-    # try:
-        model = model_info.get('model')
-        features = model_info.get('training_features', [])
-        model_name = model_info.get('model_name', '').lower()
-        mappings = self.session.get('field_mappings')
+        try:
+            model = model_info.get('model')
+            features = model_info.get('training_features', [])
+            model_name = model_info.get('model_name', '').lower()
+            mappings = self.session.get('field_mappings')
 
-        
-        if is_forecasting:
-            if model_name == 'sarimax':
-                try:
-                    # Get exogenous features
-                    exog_features = [f for f in features 
-                                   if f != mappings.get('date') 
-                                   and f != target_column]
-                    
-                    # Get start date from inference data
-                    date_col = mappings.get('date')
-                    start_date = pd.to_datetime(infer_df[date_col].min())
+            if is_forecasting:
+                if model_name == 'sarimax':
+                    try:
+                        # Get exogenous features
+                        exog_features = [f for f in features 
+                                       if f != mappings.get('timestamp') 
+                                       and f != target_column]
+                        
+                        # Get start date from inference data
+                        date_col = mappings.get('timestamp')
+                        start_date = pd.to_datetime(infer_df[date_col].min())
+                        
+                        # Create date range using configured periods
+                        date_range = pd.date_range(
+                            start=start_date, 
+                            periods=int(self.forecast_periods), 
+                            freq='M'
+                        )
+                        
+                        # Prepare exog data for configured number of months
+                        exog_data = pd.concat([infer_df[exog_features].head(1)] * int(self.forecast_periods))
+                        # Convert all columns to float to avoid type comparison issues
+                        exog_data = exog_data.apply(pd.to_numeric, errors='coerce')
+                        
+                        # Get forecast
+                        predictions = model.get_forecast(
+                            steps=int(self.forecast_periods),
+                            exog=exog_data
+                        ).predicted_mean
+                        
+                        predictions.index = date_range
+                        
+                    except Exception as e:
+                        print(f"SARIMAX prediction error: {str(e)}")
+                        raise
+                elif model_name == 'prophet':
+                    # Prophet specific handling
+                    date_col = mappings.get('timestamp')
+                    forecast_df = pd.DataFrame()
                     
                     # Create date range using configured periods
-                    date_range = pd.date_range(start=start_date, periods=self.forecast_periods, freq='M')
+                    date_range = pd.date_range(
+                        start=pd.to_datetime(infer_df[date_col].min()),
+                        periods=self.forecast_periods,
+                        freq='M'
+                    )
                     
-                    # Prepare exog data for configured number of months
-                    last_exog = infer_df[exog_features].iloc[-1:]
-                    exog_data = pd.concat([infer_df[exog_features].head(1)] * self.forecast_periods).astype(float)
-                    
-                    # Get forecast
-                    predictions = model.get_forecast(
-                        steps=self.forecast_periods,
-                        exog=exog_data
-                    ).predicted_mean
-                    
-                    predictions.index = date_range
-                    
-                except Exception as e:
-                    raise
-            elif model_name == 'prophet':
-                # Prophet specific handling
-                date_col = mappings.get('date')
-                forecast_df = pd.DataFrame()
-                
-                # Create date range using configured periods
-                date_range = pd.date_range(
-                    start=pd.to_datetime(infer_df[date_col].min()),
-                    periods=self.forecast_periods,
-                    freq='M'
-                )
-                
-                forecast_df['ds'] = date_range
-                forecast_df['y'] = np.nan
-                forecast = model.predict(forecast_df)
-                predictions = pd.Series(forecast['yhat'].values, index=date_range)
+                    forecast_df['ds'] = date_range
+                    forecast_df['y'] = np.nan
+                    forecast = model.predict(forecast_df)
+                    predictions = pd.Series(forecast['yhat'].values, index=date_range)
 
+                else:
+                    # For other forecasting models (XGBoost, LightGBM)
+                    # Convert all feature columns to numeric to avoid type comparison issues
+                    numeric_infer_df = infer_df.copy()
+                    for feature in features:
+                        numeric_infer_df[feature] = pd.to_numeric(numeric_infer_df[feature], errors='coerce')
+                    
+                    predictions = model.predict(numeric_infer_df[features])
             else:
-                # For other forecasting models (XGBoost, LightGBM)
-                predictions = model.predict(infer_df[features])
-        else:
-            # Standard regression prediction
-            predictions = model.predict(infer_df[features])
-        
-        print(f"Predictions generated. Shape: {predictions.shape}")
-        return predictions
-        
-    # except Exception as e:
-    #     self.view.show_message(f"Prediction error: {str(e)}", "error")
-    #     return None
+                # Standard regression prediction
+                # Convert all feature columns to numeric to avoid type comparison issues
+                numeric_infer_df = infer_df.copy()
+                for feature in features:
+                    numeric_infer_df[feature] = pd.to_numeric(numeric_infer_df[feature], errors='coerce')
+                
+                predictions = model.predict(numeric_infer_df[features])
+            
+            print(f"Predictions generated. Shape: {predictions.shape}")
+            return predictions
+        except Exception as e:
+            self.view.show_message(f"Prediction error: {str(e)}", "error")
+            return None
             
     def _display_predictions(self, predictions, infer_df: pd.DataFrame, 
                            is_forecasting: bool):
@@ -165,26 +186,28 @@ class ModelInference:
         
         if is_forecasting:
             # For forecasting, predictions come with a datetime index
-            date_col = self.session.get('field_mappings').get('date')
-            forecast_field = self.mappings.get('forecasting_field', '')
+            date_col = self.session.get('field_mappings').get('timestamp')
+            # Use target instead of forecasting_field
+            target_field = self.mappings.get('target', 'target')
             
             # Create a DataFrame with all prediction dates
             results_df = pd.DataFrame(index=predictions.index)
             results_df[date_col] = results_df.index
-            results_df[f'Predicted {forecast_field}'] = predictions
+            results_df[f'Predicted {target_field}'] = predictions.astype(float)
             
             # For display, show date and prediction
-            display_df = results_df[[date_col, f'Predicted {forecast_field}']].head(10)
+            display_df = results_df[[date_col, f'Predicted {target_field}']].head(10)
             msg = "**Sample Forecasts** (First 10 periods):\n"
         else:
             # For regression, predictions are a simple array
-            results_df['Predicted'] = predictions
+            results_df['Predicted'] = predictions.astype(float)
             
             # Show basic stats
             msg = "**Prediction Statistics:**\n"
-            msg += f"- Mean Prediction: {predictions.mean():.2f}\n"
-            msg += f"- Min Prediction: {predictions.min():.2f}\n"
-            msg += f"- Max Prediction: {predictions.max():.2f}\n\n"
+            predictions_float = pd.to_numeric(predictions, errors='coerce')
+            msg += f"- Mean Prediction: {predictions_float.mean():.2f}\n"
+            msg += f"- Min Prediction: {predictions_float.min():.2f}\n"
+            msg += f"- Max Prediction: {predictions_float.max():.2f}\n\n"
             msg += "**Sample Predictions** (Max 10 records):\n"
             display_df = results_df.head(10)
         
@@ -210,8 +233,9 @@ class ModelInference:
         
         if is_forecasting:
             # Add forecasting-specific info
-            date_col = self.session.get('field_mappings').get('date')
-            forecast_field = self.session.get('field_mappings').get('forecasting_field')
+            date_col = self.session.get('field_mappings').get('timestamp')
+            # Use target instead of forecasting_field
+            target_field = self.session.get('field_mappings').get('target', 'target')
             results_df = self.session.get('inference_results')
             
             summary += f"\n**Forecast Period:**\n"
@@ -221,14 +245,15 @@ class ModelInference:
             # Create visualization DataFrame
             if results_df is not None:
                 self.view.display_subheader("📊 Forecast Visualization")
-                predicted_col = f'Predicted {forecast_field}'
+                predicted_col = f'Predicted {target_field}'
                 self.view.plot_bar_chart(
                     data=results_df,
                     x_col=date_col,
                     y_col=predicted_col,
-                    title=f'Forecasted {forecast_field} by Month'
+                    title=f'Forecasted {target_field} by Month'
                 )
                 # Add cautionary note about forecast reliability
                 self.view.show_message("**Note:** Forecast reliability typically decreases for predictions further into the future. Consider this when making decisions based on longer-term predictions.")
         
-        self.session.set('step_7_summary', summary) 
+        self.session.set('step_7_summary', summary)
+        self.session.set('step_7_complete', True)  # Mark step as complete 

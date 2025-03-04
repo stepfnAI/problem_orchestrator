@@ -20,9 +20,11 @@ class ModelTraining:
             is_forecasting = self.session.get('is_forecasting', False)
             df = self.session.get('df')
             mappings = self.session.get('field_mappings')
-            
+            print("<><><><mappings",mappings)
+            print("<><><><is_forecasting",is_forecasting)
             # Get appropriate target column based on analysis type
-            target_column = mappings.get('forecasting_field' if is_forecasting else 'target')
+            target_column = mappings.get('target')
+            print("<><><><target_column",target_column)
             if not target_column:
                 self.view.show_message(
                     "❌ Target column not found in mappings.",
