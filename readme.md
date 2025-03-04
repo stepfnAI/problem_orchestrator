@@ -1,13 +1,14 @@
-# SaaS problem orchestrator Pipeline
+# AI-Powered Problem Orchestrator Pipeline
 
-An AI-powered machine learning pipeline designed for analyzing SaaS (Software as a Service) financial, usage, and support data. This pipeline helps businesses consolidate data, prepare it for machine learning, and train models to analyze their data across different operational dimensions.
+An intelligent machine learning pipeline designed for analyzing business data across multiple domains. This orchestrator helps organizations consolidate data from various sources, prepare it for machine learning, and train models to derive actionable insights.
 
 🌟 Features
 
 - **Multi-Source Data Processing**: Process and analyze data from multiple sources:
   - Financial/Billing data
   - Product usage metrics
-  - Customer support interactions
+  - Customer interactions
+  - And more...
 
 - **Intelligent Data Pipeline**:
   1. **Smart Data Gathering**
@@ -19,7 +20,7 @@ An AI-powered machine learning pipeline designed for analyzing SaaS (Software as
      - Intelligent column mapping suggestions
      - Standard schema validation
      - Custom field mapping support
-     - Problem-level granularity selection (Customer/Product)
+     - Problem-level granularity selection
 
   3. **Automated Data Cleaning**
      - Smart data type detection
@@ -28,13 +29,13 @@ An AI-powered machine learning pipeline designed for analyzing SaaS (Software as
      - Interactive cleaning confirmation
 
   4. **Flexible Data Aggregation**
-     - Multi-level aggregation (Customer/Product)
+     - Multi-level aggregation options
      - AI-suggested aggregation methods
      - Customizable aggregation rules per column
      - Aggregation explanation support
 
   5. **Advanced Data Joining**
-     - Two-phase joining process (intra-category and inter-category)
+     - Two-phase joining process
      - Smart join key detection
      - Comprehensive join health validation
      - Join progress tracking
@@ -60,12 +61,19 @@ An AI-powered machine learning pipeline designed for analyzing SaaS (Software as
      - Results visualization
      - Performance monitoring
 
+- **Supported Use Cases**:
+  - **Classification**: Binary classification problems
+  - **Regression**: Numeric value prediction
+  - **Forecasting**: Time-series prediction
+  - **Clustering**: Unsupervised pattern discovery
+  - **Recommendation**: Item suggestion systems
+
 🚀 Getting Started
 
 **Prerequisites**
 
 - Python 3.9-3.11
-- OpenAI API key (GPT-4 access required)
+- OpenAI API key
 
 ### Installation
 1. Clone the repository:
@@ -159,7 +167,7 @@ Contributions are welcome! Please follow these steps:
 📧 Contact
 Email: puneet@stepfunction.ai
 
-##
+### Database
 sudo apt-get install sqlitebrowser
 sqlitebrowser orchestrator.db
 
