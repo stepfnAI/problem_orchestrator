@@ -81,3 +81,5 @@ catboost_info/
 
 #temp
 *.ipynb
+
+temp_files/

@@ -97,7 +97,7 @@ class RegressionApp:
             session_id = self.session.get('session_id')
             
             # Load the joined dataframe if not already in session
-            if not self.session.get('df'):
+            if self.session.get('df') is None:
                 # Try to get the final table name from join summary
                 with sqlite3.connect(db.db_path) as conn:
                     cursor = conn.cursor()
