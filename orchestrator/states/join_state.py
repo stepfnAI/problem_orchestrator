@@ -460,10 +460,19 @@ class JoinState(BaseState):
                 key="right_table"
             )
             
-            # Select join type
+            # Select join type - FIX: Use the suggested join type as default
+            join_type_options = ["left", "inner"]  # Removed right, outer, and cross join options
+            # Find the index of the suggested join type in the options list
+            default_join_type_index = 0  # Default to first option (left)
+            for i, jt in enumerate(join_type_options):
+                if jt.lower() == join_type.lower():
+                    default_join_type_index = i
+                    break
+                
             join_type = self.view.select_box(
                 "Select join type:",
-                options=["left", "inner"],  # Removed right, outer, and cross join options
+                options=join_type_options,
+                index=default_join_type_index,  # Use the index of the suggested join type
                 key="join_type"
             )
             
@@ -1315,9 +1324,9 @@ class JoinState(BaseState):
         # Add additional mandatory columns based on onboarding summary
         if problem_type in ['regression', 'classification']:
             # If has_target is true, target is mandatory
-            if onboarding_summary.get('has_target') == 'True':
-                if 'target' not in mandatory_columns:
-                    mandatory_columns.append('target')
+            # if onboarding_summary.get('has_target') == 'True':
+                # if 'target' not in mandatory_columns:
+            mandatory_columns.append('target')
                 
             # If is_time_series is true, timestamp is mandatory
             if onboarding_summary.get('is_time_series') == 'True':

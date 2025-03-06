@@ -36,8 +36,8 @@ class SFNDataMappingAgent(SFNAgent):
         """Identify fields based on problem type"""
         # Configure mapping based on problem type
         mandatory_mapping = {
-            'classification': ['id', 'target'],
-            'regression': ['id', 'target'],
+            'classification': ['id'], #'target'
+            'regression': ['id'], #'target'
             'recommendation': ['product_id'],
             'clustering': ['id'],
             'forecasting': ['timestamp', 'target']

@@ -246,7 +246,7 @@ class OnboardingState(BaseState):
     def _needs_target_column(self) -> bool:
         """Check if problem type needs target column"""
         problem_type = self.session.get('problem_type')
-        return problem_type in ['classification', 'regression', 'forecasting']
+        return problem_type in [] #'classification', 'regression', 'forecasting'
         
     def _handle_target_column(self) -> bool:
         """Handle target column selection"""

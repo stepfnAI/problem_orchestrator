@@ -13,19 +13,24 @@ class StreamlitView(SFNStreamlitView):
         """Override file_uploader to include key parameter"""
         return st.file_uploader(label, type=accepted_types, key=key)
 
-    def select_box(self, label: str, options: List[str], default: Optional[str] = None, key: Optional[str] = None) -> str:
-        """Add select box functionality with default value support
+    def select_box(self, label: str, options: List[str], default: Optional[str] = None, index: Optional[int] = None, key: Optional[str] = None) -> str:
+        """Add select box functionality with default value or index support
         
         Args:
             label (str): Label for the select box
             options (List[str]): List of options to choose from
             default (str, optional): Default value to select. Defaults to None.
+            index (int, optional): Index of the default option to select. Defaults to None.
             key (str, optional): Unique key for the component. Defaults to None.
         
         Returns:
             str: Selected option
         """
-        # Find index of default value if provided
+        # If index is provided, use it directly
+        if index is not None:
+            return st.selectbox(label, options, index=index, key=key)
+        
+        # Otherwise, find index of default value if provided
         index = options.index(default) if default in options else 0
         return st.selectbox(label, options, index=index, key=key)
     
