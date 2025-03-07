@@ -305,6 +305,7 @@ class JoinState(BaseState):
             available_tables = self.session.get('available_tables', [])
             tables_data = self.session.get('tables_data', {})
             joined_tables = self.session.get('joined_tables', {})
+            join_history = self.session.get('join_history', [])
             
             print(f">>> Processing join with {len(available_tables)} available tables")
             print(f">>> Available tables: {available_tables}")
@@ -312,12 +313,104 @@ class JoinState(BaseState):
             # Combine original and joined tables data
             all_tables_data = {**tables_data, **joined_tables}
             
-            # Check if we have a suggested join
+            # Check if we're in the input collection phase
+            if not self.session.get('join_input_complete') and not self.session.get('current_join_suggestion'):
+                # Get user input for important table and custom instructions
+                important_table = None
+                custom_instructions = None
+                
+                # Display header for user input
+                self.view.display_subheader("Join Configuration")
+                
+                # Only ask for important table if we haven't already
+                if not self.session.get('important_table') and len(available_tables) > 1:
+                    # Ask user to select their most important table
+                    self.view.display_markdown(
+                        "Select your most important table that should be prioritized in joins (optional):"
+                    )
+                    
+                    important_table = self.view.select_box(
+                        "Most important table:",
+                        options=["None"] + available_tables,
+                        default="None",
+                        key="important_table_selection"
+                    )
+                    
+                    if important_table != "None":
+                        self.session.set('important_table', important_table)
+                        # Also track the original important table name for lineage tracking
+                        self.session.set('original_important_table', important_table)
+                        self.view.display_markdown(f"✅ Selected **{important_table}** as the most important table")
+                    else:
+                        important_table = None
+                else:
+                    # Get previously selected important table if any
+                    important_table = self.session.get('important_table')
+                
+                # Get custom join instructions
+                self.view.display_markdown(
+                    "Provide any specific instructions for how tables should be joined (optional):"
+                )
+                
+                custom_instructions = self.view.text_area(
+                    "Custom join instructions:",
+                    value=self.session.get('custom_join_instructions', ''),
+                    key="custom_join_instructions"
+                )
+                
+                if custom_instructions:
+                    self.session.set('custom_join_instructions', custom_instructions)
+                
+                # Add a button to proceed to AI suggestion
+                if self.view.display_button("Proceed to AI Join Suggestion", key="proceed_to_ai_suggestion"):
+                    self.session.set('join_input_complete', True)
+                    self.view.rerun_script()
+                
+                return False
+            
+            # If input is complete or we already have a suggestion, proceed with AI suggestion
             if not self.session.get('current_join_suggestion'):
+                # Get important table and custom instructions from session
+                important_table = self.session.get('important_table')
+                original_important_table = self.session.get('original_important_table')
+                custom_instructions = self.session.get('custom_join_instructions')
+                
+                # Track the important table through joins
+                if important_table and important_table not in available_tables:
+                    # The important table might have been joined already
+                    # Look through join history to find where it went
+                    for join_record in join_history:
+                        if join_record.get('left_table') == important_table or join_record.get('right_table') == important_table:
+                            # Found where our important table went - it's now part of this result table
+                            important_table = join_record.get('result_table')
+                            self.session.set('important_table', important_table)
+                            print(f">>> Updated important table to: {important_table}")
+                            break
+                
+                # Prepare other_info for the join agent
+                other_info = ""
+                if important_table:
+                    other_info += f"Important table that should be prioritized in joins: {important_table}\n\n"
+                    
+                    # Add lineage information if this is a joined table
+                    if important_table != original_important_table:
+                        other_info += f"Note: The important table '{important_table}' contains the original important table '{original_important_table}' from a previous join.\n\n"
+                
+                if custom_instructions:
+                    other_info += f"Custom join instructions: {custom_instructions}\n\n"
+                
+                # Add table mappings information
+                table_mappings = self.session.get('table_mappings', {})
+                other_info += f"Table mappings: {json.dumps(table_mappings)}"
+                
+                # Add join history information to help the LLM understand table lineage
+                if join_history:
+                    other_info += f"\n\nJoin History: {json.dumps(join_history)}\n"
+                
                 # Get AI suggestion for the next join
                 print(">>> Getting AI join suggestion")
                 with self.view.display_spinner('🤖 AI is analyzing tables for join suggestions...'):
-                    join_suggestion = self._get_join_suggestion(available_tables, all_tables_data)
+                    join_suggestion = self._get_join_suggestion(available_tables, all_tables_data, other_info)
                     
                 if not join_suggestion:
                     print(">>> ❌ Failed to get join suggestion")
@@ -334,7 +427,7 @@ class JoinState(BaseState):
             self.view.show_message(f"Error processing join: {str(e)}", "error")
             return False
             
-    def _get_join_suggestion(self, available_tables: List[str], tables_data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
+    def _get_join_suggestion(self, available_tables: List[str], tables_data: Dict[str, pd.DataFrame], other_info: str) -> Dict[str, Any]:
         """Get AI suggestion for the next join"""
         try:
             # Prepare tables metadata
@@ -369,14 +462,19 @@ class JoinState(BaseState):
                     
                     tables_metadata.append(metadata)
             
-            # Get mappings information
-            table_mappings = self.session.get('table_mappings', {})
+            # Get onboarding and mapping information to provide smart join suggestions
+            session_id = self.session.get('session_id')
+            smart_join_guidance = self._get_smart_join_guidance(session_id)
+            
+            if smart_join_guidance:
+                # Add the smart join guidance to other_info
+                other_info += f"\n\n{smart_join_guidance}"
             
             # Create task data
             task_data = {
                 'available_tables': available_tables,
                 'tables_metadata': tables_metadata,
-                'other_info': f"Table mappings: {json.dumps(table_mappings)}"
+                'other_info': other_info
             }
             
             # Create task
@@ -390,6 +488,91 @@ class JoinState(BaseState):
         except Exception as e:
             logger.error(f"Error getting join suggestion: {str(e)}")
             return {}
+        
+    def _get_smart_join_guidance(self, session_id: str) -> str:
+        """
+        Generate smart join guidance based on onboarding and mapping data
+        """
+        try:
+            # Connect to database
+            with sqlite3.connect(self.db.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Get onboarding summary - specifically query the is_time_series column
+                cursor.execute(
+                    "SELECT is_time_series FROM onboarding_summary WHERE session_id = ?",
+                    (session_id,)
+                )
+                time_series_row = cursor.fetchone()
+                
+                # Get mapping summary
+                cursor.execute(
+                    "SELECT mappings FROM mappings_summary WHERE session_id = ? AND table_name = '_state_summary'",
+                    (session_id,)
+                )
+                mapping_row = cursor.fetchone()
+                
+                # Initialize guidance
+                guidance = "Smart Join Guidance: "
+                
+                # Base guidance - always suggest joining on ID
+                guidance += "Suggest join on ID columns. "
+                
+                # Check if this is a time series problem
+                is_time_series = False
+                if time_series_row:
+                    # Print the raw time_series value from the database
+                    print(f">>>>> Raw is_time_series value: {time_series_row[0]}")
+                    
+                    # Check various possible formats of True
+                    time_series_value = time_series_row[0]
+                    if time_series_value is True or time_series_value == 'True' or time_series_value == 'true' or time_series_value == 1:
+                        is_time_series = True
+                        print(">>>>> Time series data detected!")
+                        guidance += "Also suggest join on date/timestamp columns. "
+                
+                # Check if this is ID+Product Level prediction
+                is_product_level = False
+                if mapping_row and mapping_row[0]:
+                    try:
+                        # Parse the JSON from the mappings column
+                        mapping_data = json.loads(mapping_row[0])
+                        
+                        # Print debug info about mapping data
+                        print(f">>>>> Mapping data: {mapping_data}")
+                        print(f">>>>> Prediction level: {mapping_data.get('prediction_level')}")
+                        
+                        # Extract prediction_level from the parsed JSON
+                        if mapping_data.get('prediction_level') == 'ID+Product Level':
+                            is_product_level = True
+                            print(">>>>> ID+Product Level detected!")
+                            guidance += "Also suggest join on product ID columns. "
+                            
+                    except json.JSONDecodeError as e:
+                        print(f">>>>> Error parsing mapping JSON: {str(e)}")
+                        print(f">>>>> Raw mapping data: {mapping_row[0]}")
+                
+                # Print debug info about detected features
+                print(f">>>>> is_time_series: {is_time_series}, is_product_level: {is_product_level}")
+                
+                # Combine all guidance
+                if is_time_series and is_product_level:
+                    guidance = "Smart Join Guidance: Suggest join on ID, product ID, and date/timestamp columns. "
+                elif is_time_series:
+                    guidance = "Smart Join Guidance: Suggest join on ID and date/timestamp columns. "
+                elif is_product_level:
+                    guidance = "Smart Join Guidance: Suggest join on ID and product ID columns. "
+                
+                # Log the final guidance
+                print(f">>>>> Generated join guidance: {guidance}")
+                
+                return guidance
+                
+        except Exception as e:
+            print(f">>>>> Error getting smart join guidance: {str(e)}")
+            import traceback
+            print(f">>>>> Traceback: {traceback.format_exc()}")
+            return ""
             
     def _display_join_interface(self) -> bool:
         """Display join interface and handle user input"""
@@ -421,6 +604,18 @@ class JoinState(BaseState):
             self.view.display_table(table_info)
             self.view.display_markdown("---")
             
+            # Display important table if set
+            important_table = self.session.get('important_table')
+            if important_table:
+                self.view.display_markdown(f"**Important Table:** {important_table}")
+            
+            # Display custom instructions if set
+            custom_instructions = self.session.get('custom_join_instructions')
+            if custom_instructions:
+                self.view.display_markdown("**Custom Join Instructions:**")
+                self.view.display_markdown(custom_instructions)
+            self.view.display_markdown("---")
+            
             # Display AI suggestion
             self.view.display_markdown("**🤖 AI Join Suggestion:**")
             tables_to_join = join_suggestion.get("tables_to_join", [])
@@ -428,13 +623,37 @@ class JoinState(BaseState):
             joining_fields = join_suggestion.get("joining_fields", [])
             explanation = join_suggestion.get("explanation", "")
             
-            self.view.display_markdown(f"**Tables to Join**: {', '.join(tables_to_join)}")
-            self.view.display_markdown(f"**Join Type**: {join_type}")
+            # Use the 5-5-1 column layout for displaying the suggestion
+            col1, col2, col3 = self.view.create_columns([5, 5, 1])
             
+            with col1:
+                self.view.display_markdown("**Tables to Join:**")
+                self.view.display_markdown(f"{', '.join(tables_to_join)}")
+            
+            with col2:
+                self.view.display_markdown("**Join Type:**")
+                self.view.display_markdown(f"{join_type}")
+            
+            with col3:
+                # Empty column to match layout
+                self.view.display_markdown("&nbsp;")
+            
+            # Display joining fields with better formatting
             self.view.display_markdown("**Joining Fields:**")
             for field_pair in joining_fields:
                 if len(field_pair) == 2:
-                    self.view.display_markdown(f"- {field_pair[0]} = {field_pair[1]}")
+                    # Create columns for each join condition
+                    col1, col2, col3 = self.view.create_columns([5, 5, 1])
+                    
+                    with col1:
+                        self.view.display_markdown(f"**Left:** {field_pair[0]}")
+                    
+                    with col2:
+                        self.view.display_markdown(f"**Right:** {field_pair[1]}")
+                    
+                    with col3:
+                        # Empty column to match layout
+                        self.view.display_markdown("&nbsp;")
             
             self.view.display_markdown("**Explanation:**")
             self.view.display_markdown(explanation)
@@ -443,115 +662,121 @@ class JoinState(BaseState):
             # Let user modify the suggestion
             self.view.display_markdown("**Customize Join:**")
             
-            # Select left table
-            left_table = self.view.select_box(
-                "Left Table:",
-                options=available_tables,
-                default=tables_to_join[0] if len(tables_to_join) > 0 else available_tables[0],
-                key="left_table"
-            )
+            # Get initial values from suggestion
+            left_table = tables_to_join[0] if len(tables_to_join) > 0 else None
+            right_table = tables_to_join[1] if len(tables_to_join) > 1 else None
+
+            # Create side-by-side columns for table selection with the same ratio as join conditions
+            col1, col2, col3 = self.view.create_columns([5, 5, 1])
+
+            # Left table selection
+            with col1:
+                self.view.display_markdown("**Left Table:**")
+                left_table = self.view.select_box(
+                    "Select left table:",
+                    options=available_tables,
+                    index=available_tables.index(left_table) if left_table in available_tables else 0,
+                    key="left_table"
+                )
             
-            # Select right table
-            right_table_options = [t for t in available_tables if t != left_table]
-            right_table = self.view.select_box(
-                "Right Table:",
-                options=right_table_options,
-                default=tables_to_join[1] if len(tables_to_join) > 1 and tables_to_join[1] in right_table_options else right_table_options[0],
-                key="right_table"
-            )
+            # Right table selection
+            with col2:
+                self.view.display_markdown("**Right Table:**")
+                # Filter out the left table from options
+                right_options = [t for t in available_tables if t != left_table]
+                right_table = self.view.select_box(
+                    "Select right table:",
+                    options=right_options,
+                    index=right_options.index(right_table) if right_table in right_options else 0,
+                    key="right_table"
+                )
             
-            # Select join type - FIX: Use the suggested join type as default
-            join_type_options = ["left", "inner"]  # Removed right, outer, and cross join options
-            # Find the index of the suggested join type in the options list
-            default_join_type_index = 0  # Default to first option (left)
-            for i, jt in enumerate(join_type_options):
-                if jt.lower() == join_type.lower():
-                    default_join_type_index = i
-                    break
-                
+            # Empty third column for consistency
+            with col3:
+                self.view.display_markdown("&nbsp;")
+
+            # Join type selection (common for both tables)
+            self.view.display_markdown("**Join type:**")
             join_type = self.view.select_box(
-                "Select join type:",
-                options=join_type_options,
-                index=default_join_type_index,  # Use the index of the suggested join type
+                "",  # Empty label to save space
+                options=["inner", "left"],
+                index=0 if join_type == "inner" else 1,
                 key="join_type"
             )
             
             # Get columns for both tables
-            left_columns = all_tables_data[left_table].columns.tolist() if left_table in all_tables_data else []
-            right_columns = all_tables_data[right_table].columns.tolist() if right_table in all_tables_data else []
+            left_columns = []
+            right_columns = []
             
-            # Initialize joining fields if not already set
-            if not self.session.get('current_joining_fields'):
-                # Use AI suggestion if available
+            if left_table and left_table in all_tables_data:
+                left_columns = all_tables_data[left_table].columns.tolist()
+            
+            if right_table and right_table in all_tables_data:
+                right_columns = all_tables_data[right_table].columns.tolist()
+            
+            # Initialize joining fields from suggestion or session
+            current_joining_fields = self.session.get('current_joining_fields')
+            if not current_joining_fields:
+                # Convert suggestion to the format we need
                 current_joining_fields = []
                 for field_pair in joining_fields:
-                    if len(field_pair) == 2:
-                        left_col = field_pair[0]
-                        right_col = field_pair[1]
-                        
-                        # Check if columns exist in selected tables
-                        if left_col in left_columns and right_col in right_columns:
-                            current_joining_fields.append([left_col, right_col])
-                
-                # If no valid fields found, initialize with empty list
-                self.session.set('current_joining_fields', current_joining_fields)
+                    if len(field_pair) == 2 and field_pair[0] in left_columns and field_pair[1] in right_columns:
+                        current_joining_fields.append(field_pair)
             
-            # Get current joining fields
-            current_joining_fields = self.session.get('current_joining_fields', [])
-            
-            # Display joining fields interface
-            self.view.display_markdown("**Joining Fields:**")
-            
-            # Display existing joining fields
+            # Display existing join conditions with side-by-side columns
+            self.view.display_markdown("**Join Conditions:**")
+
+            # Initialize new joining fields list
             new_joining_fields = []
-            removed_indices = []
-            
-            for i, field_pair in enumerate(current_joining_fields):
-                left_col = field_pair[0] if len(field_pair) > 0 else ""
-                right_col = field_pair[1] if len(field_pair) > 1 else ""
+
+            # Display existing join conditions with better layout
+            for i, (left_field, right_field) in enumerate(current_joining_fields):
+                # Create a row with two main columns for fields and one small column for the remove button
+                col1, col2, col3 = self.view.create_columns([5, 5, 1])
                 
-                self.view.display_markdown(f"**Join Condition {i+1}:**")
+                with col1:
+                    self.view.display_markdown(f"**Left field #{i+1}:**")
+                    selected_left = self.view.select_box(
+                        "",  # Empty label to save space
+                        options=left_columns,
+                        index=left_columns.index(left_field) if left_field in left_columns else 0,
+                        key=f"left_field_{i}"
+                    )
                 
-                # Select left column
-                left_col = self.view.select_box(
-                    "Left Column:",
-                    options=left_columns,
-                    default=left_col if left_col in left_columns else "",
-                    key=f"left_col_{i}"
-                )
+                with col2:
+                    self.view.display_markdown(f"**Right field #{i+1}:**")
+                    selected_right = self.view.select_box(
+                        "",  # Empty label to save space
+                        options=right_columns,
+                        index=right_columns.index(right_field) if right_field in right_columns else 0,
+                        key=f"right_field_{i}"
+                    )
                 
-                # Select right column
-                right_col = self.view.select_box(
-                    "Right Column:",
-                    options=right_columns,
-                    default=right_col if right_col in right_columns else "",
-                    key=f"right_col_{i}"
-                )
+                with col3:
+                    # Add some vertical spacing to align the button with the dropdowns
+                    self.view.display_markdown("&nbsp;")  # Non-breaking space for vertical alignment
+                    if self.view.display_button("❌", key=f"remove_condition_{i}"):
+                        # Skip this condition by not adding it to new_joining_fields
+                        continue
                 
-                # Add remove button
-                if self.view.display_button("Remove", key=f"remove_join_{i}"):
-                    removed_indices.append(i)
-                    # Don't add this pair to new_joining_fields
-                    continue
-                
-                # Add to new joining fields if both columns selected
-                if left_col and right_col:
-                    new_joining_fields.append([left_col, right_col])
-            
-            # If any fields were removed, update the session and rerun
-            if removed_indices:
+                # Add to new joining fields
+                new_joining_fields.append([selected_left, selected_right])
+
+            # Add a separator between conditions
+            if current_joining_fields:
+                self.view.display_markdown("---")
+
+            # Add button for new condition
+            if self.view.display_button("➕ Add Join Condition", key="add_condition"):
+                # Add a new empty condition
+                if left_columns and right_columns:
+                    new_joining_fields.append([left_columns[0], right_columns[0]])
+                    # Save to session and rerun to refresh UI
                 self.session.set('current_joining_fields', new_joining_fields)
                 self.view.rerun_script()
                 return False
             
-            # Add button to add new joining field
-            if self.view.display_button("+ Add Join Condition", key="add_join_condition"):
-                new_joining_fields.append(["", ""])
-                self.session.set('current_joining_fields', new_joining_fields)
-                self.view.rerun_script()
-                return False
-            
-            # Update joining fields in session
+            # Save current joining fields to session
             self.session.set('current_joining_fields', new_joining_fields)
             
             # Preview the join if possible
@@ -569,13 +794,7 @@ class JoinState(BaseState):
                     right_joining_fields = [pair[1] for pair in new_joining_fields]
                     
                     # Perform the join
-                    joined_df = self._perform_join(
-                        left_df, 
-                        right_df, 
-                        left_joining_fields, 
-                        right_joining_fields, 
-                        join_type
-                    )
+                    joined_df, result_table_name = self._perform_join_operation(left_table, right_table, left_joining_fields, right_joining_fields, join_type)
                     
                     # Display preview
                     self.view.display_markdown(f"**Result Shape:** {joined_df.shape[0]} rows × {joined_df.shape[1]} columns")
@@ -607,16 +826,10 @@ class JoinState(BaseState):
                     right_joining_fields = [pair[1] for pair in new_joining_fields]
                     
                     # Perform the join
-                    joined_df = self._perform_join(
-                        left_df, 
-                        right_df, 
-                        left_joining_fields, 
-                        right_joining_fields, 
-                        join_type
-                    )
+                    joined_df, result_table_name = self._perform_join_operation(left_table, right_table, left_joining_fields, right_joining_fields, join_type)
                     
                     # Create new table name
-                    new_table_name = f"joined_{left_table}_{right_table}"
+                    new_table_name = result_table_name
                     
                     # Update session data
                     joined_tables = self.session.get('joined_tables', {})
@@ -673,49 +886,46 @@ class JoinState(BaseState):
             self.view.show_message(f"Error displaying join interface: {str(e)}", "error")
             return False
             
-    def _perform_join(self, left_df: pd.DataFrame, right_df: pd.DataFrame, 
-                     left_on: List[str], right_on: List[str], join_type: str) -> pd.DataFrame:
-        """Perform the join operation between two tables"""
+    def _perform_join_operation(self, left_table: str, right_table: str, left_columns: List[str], 
+                               right_columns: List[str], join_type: str) -> Tuple[pd.DataFrame, str]:
+        """Perform the actual join operation between two tables"""
         try:
-            # Create copies of the dataframes to avoid modifying the originals
+            # Get tables data
+            tables_data = self.session.get('tables_data', {})
+            joined_tables = self.session.get('joined_tables', {})
+            
+            # Combine original and joined tables data
+            all_tables_data = {**tables_data, **joined_tables}
+            
+            # Get dataframes
+            left_df = all_tables_data[left_table]
+            right_df = all_tables_data[right_table]
+            
+            # Create a copy to avoid modifying the original
             left_df_copy = left_df.copy()
             right_df_copy = right_df.copy()
             
-            # Get list of common columns that aren't part of the join keys
-            left_cols = set(left_df_copy.columns)
-            right_cols = set(right_df_copy.columns)
-            common_cols = left_cols.intersection(right_cols)
+            # Perform the join
+            if join_type == 'inner':
+                result_df = pd.merge(left_df_copy, right_df_copy, left_on=left_columns, right_on=right_columns, how='inner')
+            elif join_type == 'left':
+                result_df = pd.merge(left_df_copy, right_df_copy, left_on=left_columns, right_on=right_columns, how='left')
+            else:
+                # Default to inner join
+                result_df = pd.merge(left_df_copy, right_df_copy, left_on=left_columns, right_on=right_columns, how='inner')
             
-            # Remove join columns from the common columns list if they have the same name
-            for l, r in zip(left_on, right_on):
-                if l == r and l in common_cols:
-                    common_cols.remove(l)
+            # Clean up table names for the result table name
+            # Remove .csv extension if present
+            clean_left_name = left_table.replace('.csv', '')
+            clean_right_name = right_table.replace('.csv', '')
             
-            # Rename all common columns in the right dataframe with a unique suffix
-            # This prevents any potential conflicts with existing _right or _right_right columns
-            if common_cols:
-                # Create a unique suffix based on the right table name or a random string
-                unique_suffix = f"_r_{str(uuid.uuid4())[:8]}"
-                
-                # Create a mapping of original column names to renamed column names
-                rename_map = {col: f"{col}{unique_suffix}" for col in common_cols}
-                
-                # Rename columns in the right dataframe
-                right_df_copy = right_df_copy.rename(columns=rename_map)
+            # Create a name for the joined table
+            result_table_name = f"joined_{clean_left_name}_{clean_right_name}"
             
-            # Perform the join with empty suffixes since we've already handled duplicates
-            merged_df = pd.merge(
-                left_df_copy, 
-                right_df_copy, 
-                left_on=left_on, 
-                right_on=right_on, 
-                how=join_type,
-                suffixes=('', '')  # No suffixes needed as we've already renamed
-            )
+            return result_df, result_table_name
             
-            return merged_df
         except Exception as e:
-            logger.error(f"Error in _perform_join: {str(e)}")
+            logger.error(f"Error performing join: {str(e)}")
             raise e
         
     def _save_join_to_db(self, left_table: str, right_table: str, join_type: str, 
@@ -1494,7 +1704,7 @@ class JoinState(BaseState):
                         """,
                         (mappings_json, existing[0])
                     )
-                    print(f"Updated final_mappings for join_summary id {existing[0]}")
+                
                 else:
                     # Insert a new row
                     final_table_name = self.session.get('final_table_name', '')
@@ -1506,7 +1716,7 @@ class JoinState(BaseState):
                         """,
                         (session_id, mappings_json, final_table_name)
                     )
-                    print(f"Inserted new row in join_summary with final_mappings")
+                
                 
                 conn.commit()
             

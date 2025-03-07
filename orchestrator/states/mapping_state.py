@@ -405,12 +405,18 @@ class MappingState(BaseState):
         if problem_type not in ['classification', 'regression']:
             return False
             
-        # Check if any table has product mapping
-        for mappings in mapping_results.values():
-            if mappings.get('product_id'):
-                return True
+        # Skip if no mappings
+        if not mapping_results:
+            return False
+            
+        # Check if ALL tables have product mapping (not just any table)
+        for table_name, mappings in mapping_results.items():
+            # If any table doesn't have product_id mapping, return False
+            if not mappings.get('product_id'):
+                return False
                 
-        return False
+        # All tables have product_id mapping
+        return True
         
     def _handle_prediction_level(self) -> bool:
         """Handle prediction level selection"""

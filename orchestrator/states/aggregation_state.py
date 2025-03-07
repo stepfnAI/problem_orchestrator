@@ -439,7 +439,7 @@ class AggregationState:
                 mapping_columns['customer_id'] = first_col
                 print(f">>> Using first column as customer_id: {first_col}")
         
-        print(f">>> Final mapping columns for table {current_table}: {mapping_columns}")
+        print(f">>> Aggregation will be on mappings {current_table}: {mapping_columns}")
         return mapping_columns
     
     def _get_aggregation_suggestions(self, df: pd.DataFrame, mapping_columns: Dict) -> Tuple[bool, Dict]:
