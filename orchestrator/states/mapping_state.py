@@ -88,12 +88,18 @@ class MappingState(BaseState):
             
             # Store is_time_series if available
             if 'is_time_series' in summary and summary['is_time_series']:
-                self.session.set('is_time_series', summary['is_time_series'] == 'True')
+                is_time_series_value = summary['is_time_series'] == 'True'
+                self.session.set('is_time_series', is_time_series_value)
+                print(f">><<Loaded is_time_series: {is_time_series_value} for problem type: {summary['problem_type']}")
             
             self.session.set('onboarding_summary', summary)
             
             # Update mandatory columns based on problem type and recommendation approach
             self._update_mandatory_columns()
+            
+            # Print the mandatory columns after update for debugging
+            problem_type = self.session.get('problem_type')
+            print(f">><<MANDATORY_COLUMNS for {problem_type} after update: {self.MANDATORY_COLUMNS.get(problem_type, [])}")
             
             return True
             
@@ -118,7 +124,25 @@ class MappingState(BaseState):
                 # For item-based or any other approach, keep only product_id
                 self.MANDATORY_COLUMNS['recommendation'] = ['product_id']
                 print(">><<Using default mandatory columns for recommendation")
-            
+        
+        # Check if this is time series data and update mandatory columns accordingly
+        is_time_series = self.session.get('is_time_series', False)
+        print(f">><<In _update_mandatory_columns: is_time_series={is_time_series}, problem_type={problem_type}")
+        
+        # Reset mandatory columns to default first
+        if problem_type == 'regression':
+            self.MANDATORY_COLUMNS['regression'] = ['id']
+        elif problem_type == 'classification':
+            self.MANDATORY_COLUMNS['classification'] = ['id']
+        
+        # Then add timestamp if it's time series data
+        if is_time_series and problem_type in ['regression', 'classification']:
+            current_mandatory = self.MANDATORY_COLUMNS.get(problem_type, [])
+            if 'timestamp' not in current_mandatory:
+                current_mandatory.append('timestamp')
+                self.MANDATORY_COLUMNS[problem_type] = current_mandatory
+                print(f">><<Added timestamp to mandatory columns for {problem_type} with time series data")
+
     def _display_mapping_status(self):
         """Display current mapping status for all tables"""
         table_names = self.session.get('table_names', [])
@@ -265,19 +289,6 @@ class MappingState(BaseState):
             # Get mandatory columns for this problem type
             mandatory_cols = self.MANDATORY_COLUMNS.get(problem_type, [])
             
-            # Check if this is time series data
-            is_time_series = self.session.get('is_time_series', False)
-            
-            # If it's time series data and problem type is regression or classification,
-            # add timestamp to mandatory columns if not already there
-            if is_time_series and problem_type in ['regression', 'classification']:
-                if 'timestamp' not in mandatory_cols:
-                    mandatory_cols.append('timestamp')
-                    print(f">><<Added timestamp to mandatory columns for time series data")
-            
-            # Get optional columns (all mappings except mandatory ones)
-            optional_cols = [k for k in mappings.keys() if k not in mandatory_cols]
-            
             # Display mapping interface
             self.view.display_subheader(f"Column Mapping for {table_name}")
             
@@ -313,6 +324,7 @@ class MappingState(BaseState):
                 confirmed_mappings[col_type] = selected_col
             
             # Then show optional fields if available
+            optional_cols = [k for k in mappings.keys() if k not in mandatory_cols]
             if optional_cols:
                 self.view.display_markdown("**Optional Fields:**")
                 for col_type in optional_cols:

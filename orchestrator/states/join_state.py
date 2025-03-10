@@ -666,6 +666,14 @@ class JoinState(BaseState):
             left_table = tables_to_join[0] if len(tables_to_join) > 0 else None
             right_table = tables_to_join[1] if len(tables_to_join) > 1 else None
 
+            # Join type selection (common for both tables)
+            self.view.display_markdown("**Join type:**")
+            join_type = self.view.select_box(
+                "",  # Empty label to save space
+                options=["inner", "left"],
+                index=0 if join_type == "inner" else 1,
+                key="join_type"
+            )
             # Create side-by-side columns for table selection with the same ratio as join conditions
             col1, col2, col3 = self.view.create_columns([5, 5, 1])
 
@@ -694,15 +702,6 @@ class JoinState(BaseState):
             # Empty third column for consistency
             with col3:
                 self.view.display_markdown("&nbsp;")
-
-            # Join type selection (common for both tables)
-            self.view.display_markdown("**Join type:**")
-            join_type = self.view.select_box(
-                "",  # Empty label to save space
-                options=["inner", "left"],
-                index=0 if join_type == "inner" else 1,
-                key="join_type"
-            )
             
             # Get columns for both tables
             left_columns = []
@@ -1420,7 +1419,7 @@ class JoinState(BaseState):
                     self.view.show_message("❌ Final joined table is empty", "error")
                     return False
                 
-                # Get existing mappings from mapping state
+                # Get existing mappings from mapping state, prioritizing the important table if specified
                 existing_mappings = self._get_existing_mappings(session_id, conn)
                 
                 # Get onboarding summary for additional requirements
@@ -1447,10 +1446,41 @@ class JoinState(BaseState):
             return False
 
     def _get_existing_mappings(self, session_id, conn):
-        """Get existing mappings from mapping state"""
+        """Get existing mappings from mapping state, prioritizing the important table if specified"""
         try:
             import json
             cursor = conn.cursor()
+            
+            # Get the important table if one is marked
+            important_table = self.session.get('important_table')
+            original_important_table = self.session.get('original_important_table')
+            
+            # If we have an important table, try to get its mappings first
+            if original_important_table:
+                print(f">>> Prioritizing mappings from important table: {original_important_table}")
+                cursor.execute(
+                    "SELECT mappings FROM mappings_summary WHERE session_id = ? AND table_name = ?",
+                    (session_id, original_important_table)
+                )
+                important_result = cursor.fetchone()
+                
+                if important_result and important_result[0]:
+                    print(f">>> Found mappings for important table: {original_important_table}")
+                    return json.loads(important_result[0])
+                    
+                # If no mappings found for the important table, try the mappings_summary table
+                cursor.execute(
+                    "SELECT mappings FROM mappings_summary WHERE session_id = ? AND table_name = ?",
+                    (session_id, original_important_table)
+                )
+                important_summary = cursor.fetchone()
+                
+                if important_summary and important_summary[0]:
+                    print(f">>> Found mappings for important table in summary: {original_important_table}")
+                    return json.loads(important_summary[0])
+            
+            # If no important table or no mappings found for it, fall back to the existing flow
+            print(">>> No important table mappings found, falling back to default flow")
             
             # First try to get table-specific mappings
             cursor.execute(

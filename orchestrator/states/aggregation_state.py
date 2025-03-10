@@ -466,6 +466,9 @@ class AggregationState:
         # Create an instance of the aggregation agent
         aggregation_agent = SFNAggregationAgent(llm_provider=DEFAULT_LLM_PROVIDER)
         
+        # Override the model config to increase max_tokens
+        aggregation_agent.model_config["max_tokens"] = 4000  # Increase from default 1000
+        
         # Prepare the task data
         task_data = {
             'table': df,
