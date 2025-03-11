@@ -8,6 +8,7 @@ import sqlite3
 from sfn_blueprint import Task
 import logging
 import uuid
+from orchestrator.utils.download_utils import DownloadUtils
 
 logger = logging.getLogger(__name__)
 
@@ -992,14 +993,14 @@ class JoinState(BaseState):
             if not available_tables or not joined_tables:
                 self.view.show_message("❌ No joined tables found", "error")
                 return False
-                
+            
             final_table_name = available_tables[0]
             final_table = joined_tables.get(final_table_name)
             
             if final_table is None:
                 self.view.show_message("❌ Final joined table not found", "error")
                 return False
-                
+            
             # Create a standardized final table name based on session ID
             session_id = self.session.get('session_id')
             short_session = session_id.split('-')[0] if session_id else 'joined'
@@ -1031,8 +1032,8 @@ class JoinState(BaseState):
                 if result_table:
                     shape_info = f" ({result_shape[0]} rows × {result_shape[1]} columns)" if result_shape else ""
                     self.view.display_markdown(f"- Result: {result_table}{shape_info}")
-                
-                self.view.display_markdown("---")
+            
+            self.view.display_markdown("---")
             
             # Display final table
             self.view.display_markdown("**Final Joined Table:**")
@@ -1040,6 +1041,17 @@ class JoinState(BaseState):
             self.view.display_markdown(f"**Shape:** {final_table.shape[0]} rows × {final_table.shape[1]} columns")
             self.view.display_markdown("**Preview:**")
             self.view.display_dataframe(final_table.head(5))
+            
+            # Add download button for the final joined data
+            self.view.display_markdown("**Download Joined Data:**")
+            DownloadUtils.create_download_button(
+                self.view, 
+                final_table, 
+                final_joined_table_name, 
+                "csv", 
+                index=False,
+                button_text=f"📥 Download Joined Dataset (CSV)"
+            )
             
             # Save the final table to the database with the standardized name
             try:
@@ -1106,7 +1118,7 @@ class JoinState(BaseState):
                 self.session.set('join_complete', True)
                 self.session.set('next_state', next_state)
                 return True
-                
+            
             return False
             
         except Exception as e:

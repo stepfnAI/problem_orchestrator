@@ -10,6 +10,7 @@ from orchestrator.config.model_config import DEFAULT_LLM_PROVIDER
 import logging
 import json
 import sqlite3
+from orchestrator.utils.download_utils import DownloadUtils
 
 logger = logging.getLogger(__name__)
 
@@ -994,6 +995,17 @@ class AggregationState:
                     
                     # Show sample of columns
                     self.view.display_markdown(f"**Columns:** {', '.join(original_data.columns[:5])}{'...' if len(original_data.columns) > 5 else ''}")
+                    
+                    # Add download button for original data (CSV only)
+                    self.view.display_markdown("**Download Data:**")
+                    DownloadUtils.create_download_button(
+                        self.view, 
+                        original_data, 
+                        f"{table_name}_original", 
+                        "csv", 
+                        index=False,
+                        button_text=f"📥 Download {table_name} (CSV)"
+                    )
             else:
                 aggregated_data = self.session.get(f"aggregated_data_{table_name}")
                 if isinstance(aggregated_data, pd.DataFrame):
@@ -1010,12 +1022,23 @@ class AggregationState:
                     # Show reduction percentage if applicable
                     if original_shape and original_shape[0] > 0:
                         reduction = ((original_shape[0] - aggregated_data.shape[0]) / original_shape[0]) * 100
-                        self.view.display_markdown(f"**Row reduction:** {reduction:.1f}% ({original_shape[0] - aggregated_data.shape[0]} rows)")
+                    self.view.display_markdown(f"**Row reduction:** {reduction:.1f}% ({original_shape[0] - aggregated_data.shape[0]} rows)")
                     
                     # Show sample of columns
                     self.view.display_markdown(f"**Columns after aggregation:** {', '.join(aggregated_data.columns[:5])}{'...' if len(aggregated_data.columns) > 5 else ''}")
+                    
+                    # Add download button for aggregated data (CSV only)
+                    self.view.display_markdown("**Download Aggregated Data:**")
+                    DownloadUtils.create_download_button(
+                        self.view, 
+                        aggregated_data, 
+                        f"{table_name}_aggregated", 
+                        "csv", 
+                        index=False,
+                        button_text=f"📥 Download Aggregated {table_name} (CSV)"
+                    )
                 
-                # Show aggregation methods
+                # Show aggregation methods (but no download button)
                 aggregation_methods = self.session.get(f"confirmed_aggregation_{table_name}", {})
                 if aggregation_methods:
                     self.view.display_markdown("**Applied aggregation methods:**")
@@ -1047,4 +1070,81 @@ class AggregationState:
             self.session.set("aggregation_complete", True)
             return True
             
-        return False 
+        return False
+    
+    def _display_aggregation_summary(self, table_name: str) -> None:
+        """
+        Display a summary of the aggregation results for a single table
+        
+        Args:
+            table_name: The name of the table
+        """
+        # Display header
+        self.view.display_subheader(f"Aggregation Summary for {table_name}")
+        
+        # Check if aggregation was needed
+        aggregation_needed = self.session.get(f"aggregation_needed_{table_name}", False)
+        
+        if not aggregation_needed:
+            self.view.show_message(f"✅ No aggregation needed for {table_name} - data is already at the desired granularity.", "success")
+            
+            # Add download button for original data (CSV only)
+            original_data = self.session.get("data")
+            if isinstance(original_data, pd.DataFrame):
+                self.view.display_markdown("**Download Data:**")
+                DownloadUtils.create_download_button(
+                    self.view, 
+                    original_data, 
+                    f"{table_name}_original", 
+                    "csv", 
+                    index=False,
+                    button_text=f"📥 Download {table_name} (CSV)"
+                )
+        else:
+            aggregated_data = self.session.get(f"aggregated_data_{table_name}")
+            if isinstance(aggregated_data, pd.DataFrame):
+                shape = aggregated_data.shape
+                self.view.show_message(f"✅ Aggregation applied successfully to {table_name}", "success")
+                self.view.display_markdown(f"**Shape after aggregation:** {shape[0]} rows × {shape[1]} columns")
+                
+                # Add download button for aggregated data (CSV only)
+                self.view.display_markdown("**Download Aggregated Data:**")
+                DownloadUtils.create_download_button(
+                    self.view, 
+                    aggregated_data, 
+                    f"{table_name}_aggregated", 
+                    "csv", 
+                    index=False,
+                    button_text=f"📥 Download Aggregated {table_name} (CSV)"
+                )
+            
+            # Show aggregation methods (but no download button)
+            aggregation_methods = self.session.get(f"confirmed_aggregation_{table_name}", {})
+            if aggregation_methods:
+                self.view.display_markdown("**Applied aggregation methods:**")
+                
+                # Create a table to display methods
+                method_data = []
+                for feature, methods in aggregation_methods.items():
+                    # Clean up method names for display
+                    clean_methods = []
+                    for method in methods:
+                        if callable(method):
+                            method_name = method.__name__
+                        else:
+                            method_name = 'unique count' if method == 'nunique' else method
+                        clean_methods.append(method_name)
+                    
+                    methods_str = ', '.join(clean_methods)
+                    method_data.append({"Feature": feature, "Aggregation Methods": methods_str})
+                
+                self.view.display_table(method_data)
+        
+        # Show button to continue to next table
+        self.view.display_markdown("---")
+        if self.view.display_button("Continue to Next Table"):
+            # Mark this table as processed and move to the next one
+            self.session.set(f"table_{table_name}_processed", True)
+            current_table_idx = self.session.get("current_table_idx", 0)
+            self.session.set("current_table_idx", current_table_idx + 1)
+            self.view.rerun_script() 

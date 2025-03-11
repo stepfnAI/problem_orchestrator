@@ -128,6 +128,15 @@ MODEL_CONFIG = {
         "n": 1,
         "stop": None
     }
+    },
+    "target_generator": {
+        "openai": {
+            "model": DEFAULT_LLM_MODEL,
+            "temperature": 0.1,  # Low temperature for code generation
+            "max_tokens": 2000,  # Higher tokens for code generation
+            "n": 1,
+            "stop": None
+        }
+    }
 } 
-}
 

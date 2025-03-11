@@ -182,6 +182,17 @@
                 "user_prompt_template": "Validate the following leakage detection results:\n{actual_output}\n\nFor now, always respond with JUST 'TRUE' on the first line and nothing else."
             }
         }
+    },
+    "target_generator": {
+        "openai": {
+            "main": {
+                "system_prompt": "You are a Python expert specializing in data science and feature engineering. Your task is to generate clean, efficient Python code that creates a target column for machine learning based on user instructions. The code should be safe, well-structured, and handle edge cases appropriately.",
+                "user_prompt_template": "Generate Python code to create a target column based on the following instructions:\n\nUser Instructions:\n{user_instructions}\n\nDataFrame Information:\n- Shape: {df_shape}\n- Columns: {df_columns}\n- Sample Data (first 5 rows):\n{df_sample}\n\nProblem Type: {problem_type}\n\nPrevious Error (if any): {error_message}\n\nRequirements:\n1. Generate code that creates a new column named 'target' in the DataFrame 'df'\n2. For classification problems, ensure the target is categorical/binary\n3. For regression problems, ensure the target is numerical\n4. Handle missing values and edge cases\n5. Include validation checks to ensure the target is appropriate for the problem type\n6. Do not modify any existing columns\n\nProvide your response in this JSON format:\n{{\n    \"code\": \"# Your Python code here\\n...\",\n    \"explanation\": \"Clear explanation of how the target is created and what it represents\",\n    \"preview\": \"Description of what the resulting target column will look like\"\n}}"
+            },
+            "validation": {
+                "system_prompt": "You are a code validator specializing in data science code. Your task is to validate Python code that creates a target column for machine learning.",
+                "user_prompt_template": "Validate the following code that creates a target column:\n\nCode:\n{code}\n\nUser Instructions:\n{user_instructions}\n\nProblem Type: {problem_type}\n\nCheck for:\n1. Syntax errors\n2. Logical errors\n3. Appropriate target type for the problem type\n4. Handling of edge cases and missing values\n5. Any security concerns\n\nRespond with 'TRUE' if the code is valid, or 'FALSE' followed by a detailed explanation of the issues."
+            }
+        }
     }
-
 }
