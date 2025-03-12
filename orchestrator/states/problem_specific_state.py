@@ -10,6 +10,7 @@ from orchestrator.states.usecase_states.clustering.clustering_main_orchestrator 
 from orchestrator.states.usecase_states.recommendation.recommendation_main_orchestrator import RecommendationOrchestrator
 from orchestrator.states.usecase_states.regression_forecasting.regression_main_orchestrator import RegressionApp
 from orchestrator.states.usecase_states.classification.classification_main_orchestrator import ClassificationApp
+from orchestrator.states.target_generation_state import TargetGenerationState
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,39 @@ class ProblemSpecificState:
         # Get problem type from session
         problem_type = self.session.get('next_state', 'unknown')
         logger.info(f"Problem type: {problem_type}")
+        
+        # Fetch mappings and problem details if not already done
+        if not self.session.get('field_mappings'):
+            self._fetch_mappings_and_problem_details()
+            
+        # Try to load the joined dataframe
+        try:
+            from orchestrator.storage.db_connector import DatabaseConnector
+            db = DatabaseConnector()
+            session_id = self.session.get('session_id')
+            
+            # Load the joined dataframe and set it if not None
+            df = db.get_joined_dataframe(session_id)
+            if df is not None:
+                self.session.set('df', df)
+                logger.info(f"Loaded joined dataframe with shape: {df.shape}")
+        except Exception as e:
+            logger.error(f"Error loading joined dataframe: {str(e)}")
+                
+        # Execute target generation if needed
+        if problem_type in ['classification', 'regression', 'forecasting']:
+            target_state = TargetGenerationState(self.session, self.view)
+            
+            target_result = target_state.execute()
+            if not target_result:
+                return False
+                
+            # Debug print to verify target column exists after target generation
+            df = self.session.get('df')
+            mappings = self.session.get('field_mappings', {})
+            print(f"DEBUG: After target generation - df columns: {list(df.columns) if df is not None else 'None'}")
+            print(f"DEBUG: After target generation - target in mappings: {mappings.get('target')}")
+            print(f"DEBUG: After target generation - target in df columns: {mappings.get('target') in df.columns if df is not None and mappings.get('target') else False}")
         
         # Route to the appropriate problem-specific orchestrator
         if problem_type == 'clustering':

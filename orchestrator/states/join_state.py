@@ -223,6 +223,17 @@ class JoinState(BaseState):
             else:
                 print(">>> No table mappings found")
                 
+            # When validating mappings for regression/classification, modify the message:
+            problem_type = self.session.get('problem_type', '')
+            if problem_type in ['regression', 'classification', 'forecasting']:
+                if not mappings.get('target'):
+                    # Instead of error, show an informational message
+                    self.view.show_message(
+                        "ℹ️ No target column mapped. You can either map a target column now or use the Target Generator later to create one.",
+                        "info"
+                    )
+                    # Don't return False here, allow to continue
+            
             return True
             
         except Exception as e:
@@ -1574,12 +1585,8 @@ class JoinState(BaseState):
         mandatory_columns = base_mandatory.get(problem_type, [])
         
         # Add additional mandatory columns based on onboarding summary
-        if problem_type in ['regression', 'classification']:
-            # If has_target is true, target is mandatory
-            # if onboarding_summary.get('has_target') == 'True':
-                # if 'target' not in mandatory_columns:
-            mandatory_columns.append('target')
-                
+        if problem_type in ['regression', 'classification', 'forecasting']:
+            
             # If is_time_series is true, timestamp is mandatory
             if onboarding_summary.get('is_time_series') == 'True':
                 if 'timestamp' not in mandatory_columns:
@@ -1598,8 +1605,8 @@ class JoinState(BaseState):
         
         # Get optional columns based on problem type
         optional_mapping = {
-            'classification': ['product_id', 'timestamp', 'revenue'],
-            'regression': ['product_id', 'timestamp', 'revenue'],
+            'classification': ['product_id', 'timestamp', 'revenue','target'],
+            'regression': ['product_id', 'timestamp', 'revenue','target'],
             'recommendation': ['id', 'interaction_value', 'timestamp'],
             'clustering': ['product_id', 'timestamp', 'revenue'],
             'forecasting': ['product_id', 'id', 'revenue']
@@ -1667,10 +1674,23 @@ class JoinState(BaseState):
         # Add a button to confirm mappings
         if self.view.display_button("Confirm Mappings", key="confirm_final_mappings"):
             # Check if all mandatory columns are mapped
-            missing = [col for col in mandatory_columns if col not in updated_mappings or not updated_mappings[col]]
+            # First, filter out 'target' from mandatory columns for certain problem types
+            problem_type = self.session.get('problem_type', '')
+            filtered_mandatory = mandatory_columns.copy()
+            
+            if problem_type in ['classification', 'regression', 'forecasting'] and 'target' in filtered_mandatory:
+                # Make target optional with info message
+                if 'target' not in updated_mappings or not updated_mappings['target']:
+                    self.view.show_message(
+                        "ℹ️ No target column mapped. You'll be able to create one in the next step.",
+                        "info"
+                    )
+                    filtered_mandatory.remove('target')
+            
+            missing = [col for col in filtered_mandatory if col not in updated_mappings or not updated_mappings[col]]
             
             if missing:
-                # Show error for missing mandatory columns
+                # Show error for missing mandatory columns (excluding target if applicable)
                 missing_names = [col.replace('_', ' ').title() for col in missing]
                 self.view.show_message(
                     f"❌ Please map all required columns: {', '.join(missing_names)}",

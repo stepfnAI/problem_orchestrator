@@ -583,4 +583,33 @@ class DatabaseConnector:
                 
         except Exception as e:
             print(f"Error getting joined dataframe: {str(e)}")
-            return None 
+            return None
+
+    def save_target_generation(self, session_id: str, instructions: str, code: str, explanation: str):
+        """Save target generation details to database"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            # Create table if it doesn't exist
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS target_generation (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT,
+                    instructions TEXT,
+                    code TEXT,
+                    explanation TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Insert data
+            cursor.execute(
+                """
+                INSERT INTO target_generation 
+                (session_id, instructions, code, explanation) 
+                VALUES (?, ?, ?, ?)
+                """,
+                (session_id, instructions, code, explanation)
+            )
+            
+            conn.commit() 

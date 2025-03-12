@@ -217,6 +217,20 @@ class StreamlitView(SFNStreamlitView):
             # Show a message if no data
             st.info("No data to display") 
 
+    def display_dataframe(self, df: pd.DataFrame, use_container_width: bool = True):
+        """Safely display a pandas DataFrame
+        
+        Args:
+            df (pd.DataFrame): DataFrame to display
+            use_container_width (bool, optional): Whether to expand table to container width. Defaults to True.
+        """
+        if df is not None and not df.empty:
+            # Display the dataframe
+            st.dataframe(df, use_container_width=use_container_width)
+        else:
+            # Show a message if no data
+            st.info("No data to display")
+
     def radio_select(self, label: str, options: List[str], default: Optional[str] = None, key: Optional[str] = None) -> str:
         """Display a radio button selection with default value support
         
@@ -320,3 +334,16 @@ class StreamlitView(SFNStreamlitView):
             key=key,
             help=help
         ) 
+
+    def select_option(self, label: str, options: List[str], key: Optional[str] = None) -> str:
+        """Display a radio button group for selecting an option
+        
+        Args:
+            label (str): Label for the selection
+            options (List[str]): List of options to choose from
+            key (str, optional): Unique key for the component. Defaults to None.
+            
+        Returns:
+            str: Selected option
+        """
+        return st.radio(label, options, key=key) 

@@ -44,9 +44,22 @@ class DataSplitting:
             
             try:
                 # Get data and perform split
-                df = self.session.get('df')
-                mappings = self.session.get('field_mappings')
-                date_col = mappings.get('date')
+                df = self.session.get('df').copy()  # Make a copy to avoid modifying the original
+                mappings = self.session.get('field_mappings', {})
+                date_col = mappings.get('timestamp')
+                
+                # Debug prints to verify dataframe and target column
+                print(f"DEBUG: In regression splitting - df shape: {df.shape if df is not None else 'None'}")
+                print(f"DEBUG: In regression splitting - df columns: {list(df.columns) if df is not None else 'None'}")
+                print(f"DEBUG: In regression splitting - mappings: {mappings}")
+                print(f"DEBUG: In regression splitting - target column: {mappings.get('target')}")
+                
+                # Check if target column exists in the dataframe
+                target_column = mappings.get('target')
+                if target_column and target_column not in df.columns:
+                    print(f"DEBUG: Target column '{target_column}' not found in dataframe. Creating dummy target column for splitting.")
+                    # Create a dummy target column for splitting purposes
+                    df[target_column] = 0  # Default value, will be ignored in splitting
                 
                 with self.view.display_spinner('🤖 AI is determining optimal split...'):
                     task = Task("Split data", data={
@@ -92,6 +105,9 @@ class DataSplitting:
                 
                 # Save and display results outside spinner
                 self.session.set('split_info', split_info)
+                
+                # Store the original dataframe back to ensure we don't lose the target column
+                self.session.set('df', self.session.get('df'))
                 self._display_split_info(split_info)
                 
                 # Show confirmation button
@@ -134,9 +150,9 @@ class DataSplitting:
             self.session.set('splitting_started', True)
             
             # Get data and perform split
-            df = self.session.get('df')
-            mappings = self.session.get('field_mappings')
-            date_col = mappings.get('date')
+            df = self.session.get('df').copy()  # Make a copy to avoid modifying the original
+            mappings = self.session.get('field_mappings', {})
+            date_col = mappings.get('timestamp')
             
             with self.view.display_spinner('🤖 AI is determining optimal split...'):
                 task = Task("Split data", data={
