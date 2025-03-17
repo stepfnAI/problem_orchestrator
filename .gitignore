@@ -83,3 +83,9 @@ catboost_info/
 *.ipynb
 
 temp_files/
+
+#logs
+*.log
+*.log.*
+*.log.*.*
+*.log.*.*.*
