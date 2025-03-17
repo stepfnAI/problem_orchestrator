@@ -111,10 +111,10 @@ export OPENAI_API_KEY='your_openai_api_key'
 
 ```bash
 # Windows
-streamlit run .\orchestration\main_orchestration.py
+python -m autonomous_framework.main --goal "predict churn" --data-path "test/data/main_billing_data_subset.csv"
 
-# Linux/Mac
-streamlit run orchestrator/app.py
+# Linux/Mac   #temp
+python -m autonomous_framework.main --goal "predict churn" --data-path "test/data/main_billing_data_subset.csv"
 ```
 
 
