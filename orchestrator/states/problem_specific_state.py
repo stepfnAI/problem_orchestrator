@@ -57,7 +57,7 @@ class ProblemSpecificState:
             logger.error(f"Error loading joined dataframe: {str(e)}")
                 
         # Execute target generation if needed
-        if problem_type in ['classification', 'regression', 'forecasting']:
+        if self._needs_target_preparation(problem_type):
             target_state = TargetGenerationState(self.session, self.view)
             
             target_result = target_state.execute()
@@ -70,6 +70,12 @@ class ProblemSpecificState:
             print(f"DEBUG: After target generation - df columns: {list(df.columns) if df is not None else 'None'}")
             print(f"DEBUG: After target generation - target in mappings: {mappings.get('target')}")
             print(f"DEBUG: After target generation - target in df columns: {mappings.get('target') in df.columns if df is not None and mappings.get('target') else False}")
+            
+            # CRITICAL: Verify target column exists before proceeding
+            if df is not None and mappings.get('target') and mappings.get('target') not in df.columns:
+                print(f"ERROR: Target column '{mappings.get('target')}' not found in dataframe after target generation")
+                self.view.show_message(f"❌ Target column '{mappings.get('target')}' not found in dataframe", "error")
+                return False
         
         # Route to the appropriate problem-specific orchestrator
         if problem_type == 'clustering':
@@ -105,6 +111,29 @@ class ProblemSpecificState:
             self.view.show_message(f"Unknown problem type: {problem_type}", "error")
             return False
     
+    def _needs_target_preparation(self, problem_type):
+        """
+        Determine if target preparation is needed based on problem type and existing mappings.
+        
+        Returns:
+            bool: True if target preparation is needed, False otherwise
+        """
+        # Only classification and regression need target preparation
+        if problem_type not in ['classification', 'regression']:
+            return False
+            
+        # Check if target is already mapped in field_mappings
+        mappings = self.session.get('field_mappings', {})
+        df = self.session.get('df')
+        
+        # If target is mapped and exists in dataframe, no need for target preparation
+        if mappings.get('target') and df is not None and mappings.get('target') in df.columns:
+            logger.info(f"Target column '{mappings.get('target')}' already exists, skipping target preparation")
+            return False
+            
+        # Otherwise, target preparation is needed
+        return True
+        
     def _fetch_mappings_and_problem_details(self):
         """
         Fetch mappings from mapping_summary table and problem statement details
