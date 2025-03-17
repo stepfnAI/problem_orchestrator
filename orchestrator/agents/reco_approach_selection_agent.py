@@ -2,7 +2,7 @@ from typing import Dict
 import pandas as pd
 from sfn_blueprint import SFNAgent, Task, SFNAIHandler, SFNPromptManager
 import os
-from recommendation_agent.config.model_config import MODEL_CONFIG, DEFAULT_LLM_PROVIDER
+from orchestrator.config.model_config import MODEL_CONFIG, DEFAULT_LLM_PROVIDER
 import json
 
 class SFNApproachSelectionAgent(SFNAgent):

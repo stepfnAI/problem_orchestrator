@@ -137,6 +137,24 @@ MODEL_CONFIG = {
             "n": 1,
             "stop": None
         }
+    },
+    "meta_agent": {
+        "openai": {
+            "model": DEFAULT_LLM_MODEL,
+            "temperature": 0.2,  # Low temperature for logical decision making
+            "max_tokens": 1500,  # Higher tokens for detailed reasoning
+            "n": 1,
+            "stop": None
+        }
+    },
+    "data_analyzer": {
+        "openai": {
+            "model": DEFAULT_LLM_MODEL,
+            "temperature": 0.2,  # Low temperature for analytical insights
+            "max_tokens": 1500,
+            "n": 1,
+            "stop": None
+        }
     }
 } 
 
