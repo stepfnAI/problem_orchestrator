@@ -34,4 +34,5 @@ class AgentMetadata:
     description: str
     category: AgentCategory
     capabilities: List[AgentCapability]
+    output_type: str = "DIRECT"  # DIRECT, EXECUTABLE, ADVISORY, COMPOSITE
     dependencies: List[str] = None 

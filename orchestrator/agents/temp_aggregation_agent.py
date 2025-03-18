@@ -1,42 +1,46 @@
 from typing import List, Dict, Union
 import pandas as pd
 from sfn_blueprint import SFNAgent, Task, SFNAIHandler, SFNPromptManager
-from aggregation_agent.config.model_config import MODEL_CONFIG
+from orchestrator.config.model_config import MODEL_CONFIG, DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
 import os
 import json
 import re
 
 class SFNAggregationAgent(SFNAgent):
-    def __init__(self, llm_provider: str):
+    def __init__(self):
         super().__init__(name="Aggregation Advisor", role="Data Aggregation Advisor")
-        self.llm_provider = llm_provider
         self.ai_handler = SFNAIHandler()
+        self.llm_provider = DEFAULT_LLM_PROVIDER
         self.model_config = MODEL_CONFIG["aggregation_suggestions"]
+        print(f">>><<<1111 model_config: {self.model_config}")
+        # Ensure model_config has all necessary keys
         parent_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../'))
         prompt_config_path = os.path.join(parent_path, 'config', 'prompt_config.json')
         self.prompt_manager = SFNPromptManager(prompt_config_path)
 
     def execute_task(self, task: Task) -> Union[Dict, bool]:
         """Main entry point for the agent's task execution"""
+        print(f">>><<< Executing task with model_config: {self.model_config}")
         df = task.data.get('table')
         mapping_columns = task.data.get('mapping_columns', {})
 
         
         # First check if aggregation is needed
-        needs_aggregation = self._check_aggregation_needed(df, mapping_columns)
+        # needs_aggregation = self._check_aggregation_needed(df, mapping_columns)
         
-        if not needs_aggregation:
-            # Return a special response that indicates no aggregation needed
-            return {
-                "__no_aggregation_needed__": True,
-                "__message__": "No aggregation needed for this dataset as there are no duplicate rows after grouping."
-            }
+        # if not needs_aggregation:
+        #     # Return a special response that indicates no aggregation needed
+        #     return {
+        #         "__no_aggregation_needed__": True,
+        #         "__message__": "No aggregation needed for this dataset as there are no duplicate rows after grouping."
+        #     }
         
         # If aggregation is needed, get suggestions with explanations
         try:
             result = self._generate_aggregation_suggestions(df, mapping_columns)
             return result
         except Exception as e:
+            print(f"Error during task execution: {str(e)}")
             raise
 
     def _clean_json_string(self, json_string: str) -> Dict:
@@ -105,6 +109,7 @@ class SFNAggregationAgent(SFNAgent):
 
     def _generate_aggregation_suggestions(self, df: pd.DataFrame, mapping_columns: Dict) -> Dict:
         """Generate detailed aggregation suggestions with explanations"""
+        print(f">>><<< Using model_config in _generate_aggregation_suggestions: {self.model_config}")
         
         # Prepare data type dictionary
         feature_dtype_dict = df.dtypes.astype(str).to_dict()
@@ -133,7 +138,6 @@ class SFNAggregationAgent(SFNAgent):
                 del sample_data_dict[col]
             if col in column_text_describe_dict:
                 del column_text_describe_dict[col]
-
 
         # Prepare groupby message
         groupby_message = "Aggregation will be on the following fields:\n"
@@ -167,27 +171,33 @@ class SFNAggregationAgent(SFNAgent):
             **task_data
         )
 
+        # Access the nested configuration for the specific provider
+        provider_config = self.model_config.get(self.llm_provider, {})
+        
         configuration = {
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            "temperature": self.model_config["temperature"],
-            "max_tokens": self.model_config["max_tokens"],
-            "n": self.model_config["n"],
-            "stop": self.model_config["stop"]
+            "temperature": provider_config.get("temperature", 0.3),  # Use provider-specific config with fallback
+            "max_tokens": provider_config.get("max_tokens", 1000),
+            "n": provider_config.get("n", 1),
+            "stop": provider_config.get("stop", None)
         }
+
+        print(f">>><<< Configuration for LLM: {configuration}")
 
         response, token_cost_summary = self.ai_handler.route_to(
             llm_provider=self.llm_provider, 
             configuration=configuration, 
-            model=self.model_config['model']
+            model=provider_config.get('model', DEFAULT_LLM_MODEL)  # Use provider-specific model with fallback
         )
-
+        print(f">>><<<111 response: {response}")
         try:
             cleaned_json = self._clean_json_string(response)
             return cleaned_json
         except Exception as e:
+            print(f"Error cleaning JSON: {str(e)}")
             return {}
         
     def get_validation_params(self, response: Union[Dict, List[str]], validation_task: Task) -> dict:

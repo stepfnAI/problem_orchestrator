@@ -38,20 +38,22 @@ class ContextManager:
             self._load_session()
         
         self.storage_dir = os.path.join("./sessions", self.session_id)
-        self.memory: Dict[str, Any] = {
-            "tables": {},
-            "agent_outputs": {},
+        self.memory = {
+            "metadata": {
+                "created": datetime.now().isoformat(),
+                "last_updated": datetime.now().isoformat()
+            },
             "workflow_state": {
                 "current_goal": None,
-                "completed_steps": [],
                 "current_step": None,
+                "completed_steps": [],
                 "errors": []
             },
-            "metadata": {
-                "session_id": self.session_id,
-                "created_at": datetime.now().isoformat(),
-                "last_updated": datetime.now().isoformat()
-            }
+            "tables": {},
+            "tables_metadata": {},  # Add this line to initialize tables_metadata
+            "agent_outputs": {},
+            "processed_agent_outputs": {},  # New field for processed outputs
+            "current_dataframe": None  # Add dataframe storage
         }
         
         # Create storage directory if it doesn't exist
@@ -59,20 +61,28 @@ class ContextManager:
         
     def store_table(self, table_name: str, df: pd.DataFrame, metadata: Dict = None):
         """Store a table in memory"""
-        self.memory["tables"][table_name] = {
-            "data": df,
+        # Store the actual DataFrame directly in the tables dictionary
+        self.memory["tables"][table_name] = df
+        
+        # Also store metadata separately
+        self.memory["tables_metadata"][table_name] = {
             "metadata": metadata or {},
             "shape": df.shape,
             "columns": df.columns.tolist(),
             "dtypes": df.dtypes.astype(str).to_dict(),
             "added_at": datetime.now().isoformat()
         }
+        
+        # Set as current dataframe if none exists
+        if self.memory["current_dataframe"] is None:
+            self.memory["current_dataframe"] = df
+        
         self._update_last_modified()
         
         # Save to disk for persistence
         df.to_parquet(os.path.join(self.storage_dir, f"{table_name}.parquet"))
         
-    def get_table(self, table_name: str):
+    def get_table(self, table_name: str) -> Optional[pd.DataFrame]:
         """Get a table from the context
         
         Args:
@@ -81,14 +91,29 @@ class ContextManager:
         Returns:
             DataFrame or None if not found
         """
-        # First try to get from memory tables
-        if table_name in self.memory["tables"] and "data" in self.memory["tables"][table_name]:
-            return self.memory["tables"][table_name]["data"]
+        # Check if it's in the tables dictionary
+        if table_name in self.memory["tables"]:
+            table_data = self.memory["tables"][table_name]
+            if isinstance(table_data, pd.DataFrame):
+                return table_data
         
-        # Then try to get from context tables
-        if table_name in self.context["tables"]:
-            return self.context["tables"][table_name]
+        # If we get here, the table wasn't found in memory
+        # Try to load from disk as a fallback
+        try:
+            parquet_path = os.path.join(self.storage_dir, f"{table_name}.parquet")
+            if os.path.exists(parquet_path):
+                df = pd.read_parquet(parquet_path)
+                # Store it in memory for future use
+                self.memory["tables"][table_name] = df
+                return df
+        except Exception as e:
+            logger.error(f"Error loading table from disk: {str(e)}")
         
+        # If all else fails, return the current dataframe as a last resort
+        if self.memory["current_dataframe"] is not None:
+            return self.memory["current_dataframe"]
+        
+        # If we get here, the table wasn't found
         return None
     
     def list_tables(self) -> List[str]:
@@ -145,14 +170,22 @@ class ContextManager:
         """Get the current step"""
         return self.memory["workflow_state"]["current_step"]
     
-    def add_error(self, error: str, agent_name: str = None):
-        """Add an error to the workflow state"""
+    def add_error(self, error_message: str):
+        """Add an error to the workflow state
+        
+        Args:
+            error_message: Error message to add
+        """
         self.memory["workflow_state"]["errors"].append({
-            "error": error,
-            "agent": agent_name,
+            "message": error_message,
             "timestamp": datetime.now().isoformat()
         })
+        
+        # Update last modified timestamp
         self._update_last_modified()
+        
+        # Log the error
+        logger.error(f"Added error to workflow: {error_message}")
     
     def get_workflow_summary(self) -> Dict:
         """Get a summary of the workflow state"""
@@ -244,17 +277,70 @@ class ContextManager:
         # Log the addition
         print(f"Added table '{table_name}' to context with {df.shape[0]} rows and {df.shape[1]} columns")
 
-    def get_recent_steps(self, count=3):
-        """Get the most recent steps in the workflow
+    def get_recent_steps(self, n: int = 3) -> List[str]:
+        """Get the most recent n steps from the workflow
         
         Args:
-            count: Number of recent steps to return
+            n: Number of recent steps to return
             
         Returns:
             List of recent step names
         """
-        # Get the completed steps from workflow state
         completed_steps = self.memory["workflow_state"]["completed_steps"]
+        return completed_steps[-n:] if completed_steps else []
+
+    def get_current_dataframe(self) -> pd.DataFrame:
+        """Get the current working dataframe"""
+        return self.memory["current_dataframe"]
+
+    def update_dataframe(self, df: pd.DataFrame):
+        """Update the current working dataframe"""
+        self.memory["current_dataframe"] = df
+        # Also update the table metadata
+        self.memory["tables"]["current"] = {
+            "shape": df.shape,
+            "columns": df.columns.tolist(),
+            "dtypes": {k: str(v) for k, v in df.dtypes.items()},
+            "metadata": {
+                "last_updated": datetime.now().isoformat()
+            }
+        }
+
+    def _load_session(self):
+        """Load session from disk"""
+        # Implementation of _load_session method
+        pass 
+
+    def store_processed_output(self, agent_name, processed_output):
+        """Store processed output from an agent"""
+        self.memory["processed_agent_outputs"][agent_name] = processed_output
+        self._update_last_modified()
         
-        # Return the last 'count' steps
-        return completed_steps[-count:] if completed_steps else [] 
+        # Log the storage
+        logger.info(f"Stored processed output from {agent_name}")
+
+    def get_processed_output(self, agent_name):
+        """Get processed output from an agent"""
+        return self.memory["processed_agent_outputs"].get(agent_name)
+
+    def get_all_processed_outputs(self):
+        """Get all processed outputs"""
+        return self.memory["processed_agent_outputs"]
+
+    def add_step_to_workflow(self, step_name: str):
+        """Add a step to the workflow history
+        
+        Args:
+            step_name: Name of the step/agent that was executed
+        """
+        # Add to completed steps
+        self.memory["workflow_state"]["completed_steps"].append(step_name)
+        
+        # Update current step
+        self.memory["workflow_state"]["current_step"] = step_name
+        
+        # Update last modified timestamp
+        self._update_last_modified()
+        
+        # Log the addition
+        logger.info(f"Added step '{step_name}' to workflow") 

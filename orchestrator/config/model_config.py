@@ -155,6 +155,15 @@ MODEL_CONFIG = {
             "n": 1,
             "stop": None
         }
+    },
+    "aggregation_suggestions": {
+        "openai": {
+            "model": DEFAULT_LLM_MODEL,
+            "temperature": 0.3,
+            "max_tokens": 1000,
+            "n": 1,
+            "stop": None
+        }
     }
 } 
 

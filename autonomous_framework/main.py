@@ -45,14 +45,17 @@ def register_existing_agents(registry: AgentRegistry):
             name="field_mapper",
             description="Maps columns in a dataset to standard field names based on problem type",
             category=AgentCategory.DATA_TRANSFORMATION,
+            output_type="DIRECT",  # Direct mapping output
             capabilities=[
                 AgentCapability(
                     name="map_columns",
                     description="Maps columns to standard field names",
                     required_inputs=["df", "problem_type"],
                     optional_inputs=[],
-                    output_schema={"field_name": "column_name"},
-                    example_use_case="Mapping customer_id column to standard 'id' field"
+                    output_schema={
+                        "field_name": "column_name"
+                    },
+                    example_use_case="Mapping raw column names to standard field names"
                 )
             ]
         )
@@ -65,12 +68,13 @@ def register_existing_agents(registry: AgentRegistry):
             name="join_suggester",
             description="Suggests the best way to join multiple tables",
             category=AgentCategory.JOIN,
+            output_type="ADVISORY",  # Advisory output
             capabilities=[
                 AgentCapability(
                     name="suggest_join",
                     description="Suggests join strategy between tables",
                     required_inputs=["available_tables", "tables_metadata"],
-                    optional_inputs=[{"name": "other_info", "description": "Additional context"}],
+                    optional_inputs=[],
                     output_schema={
                         "tables_to_join": ["table1", "table2"],
                         "type_of_join": "inner/left/right/outer",
@@ -90,6 +94,7 @@ def register_existing_agents(registry: AgentRegistry):
             name="aggregation_advisor",
             description="Suggests and performs data aggregation",
             category=AgentCategory.AGGREGATION,
+            output_type="ADVISORY",  # Advisory output
             capabilities=[
                 AgentCapability(
                     name="suggest_aggregation",
@@ -114,6 +119,7 @@ def register_existing_agents(registry: AgentRegistry):
             name="target_generator",
             description="Generates target column based on user instructions",
             category=AgentCategory.TARGET_GENERATION,
+            output_type="EXECUTABLE",  # Executable code output
             capabilities=[
                 AgentCapability(
                     name="generate_target",
@@ -309,31 +315,93 @@ def print_workflow_summary(results):
     
     print("\n" + "="*80)
 
-def load_data(data_path):
+def load_data(args, context_manager):
     """Load data from file"""
-    if not data_path:
-        return None
+    if args.data_path:
+        try:
+            # Load data
+            df = pd.read_csv(args.data_path)
+            print(f"Loaded data from {args.data_path}: {df.shape[0]} rows, {df.shape[1]} columns")
+            
+            # Get table name from path
+            table_name = os.path.basename(args.data_path)
+            
+            # Store in context
+            context_manager.store_table(table_name, df)
+            
+            # Also set as current dataframe
+            context_manager.memory["current_dataframe"] = df
+            
+            print(f"Added table '{table_name}' to context with {df.shape[0]} rows and {df.shape[1]} columns")
+            logger.info(f"Added table '{table_name}' to context")
+            
+            return df
+        except Exception as e:
+            print(f"Error loading data: {str(e)}")
+            logger.error(f"Error loading data: {str(e)}")
+    return None
+
+def print_progress(context_manager):
+    """Print workflow progress and results"""
+    current_state = context_manager.get_workflow_summary()
     
-    if not os.path.exists(data_path):
-        logger.error(f"Data file not found: {data_path}")
-        return None
+    print("\n=== Workflow Progress ===")
+    print(f"Goal: {current_state['goal']}")
+    print(f"Completed Steps: {len(current_state['completed_steps'])}")
     
-    try:
-        if data_path.endswith('.csv'):
-            df = pd.read_csv(data_path)
-        elif data_path.endswith(('.xls', '.xlsx')):
-            df = pd.read_excel(data_path)
-        elif data_path.endswith('.parquet'):
-            df = pd.read_parquet(data_path)
-        else:
-            logger.error(f"Unsupported file format: {data_path}")
-            return None
+    # If we have a dataframe with target, show preview
+    df = context_manager.get_current_dataframe()
+    if df is not None and 'target' in df.columns:
+        print("\n=== Target Column Preview ===")
+        print("\nFirst few rows:")
+        print(df[['target']].head())
+        print("\nTarget Distribution:")
+        print(df['target'].value_counts())
+
+def run_workflow(goal: str, data_path: str):
+    # Initialize components
+    context_manager = ContextManager()
+    agent_registry = AgentRegistry()
+    execution_engine = ExecutionEngine(agent_registry, context_manager)
+    
+    # Load initial data
+    df = pd.read_csv(data_path)
+    context_manager.update_dataframe(df)
+    
+    while True:
+        # Get next agent decision
+        meta_agent = MetaAgent(context_manager, agent_registry)
+        next_action = meta_agent.decide_next_action()
         
-        logger.info(f"Loaded data from {data_path}: {df.shape[0]} rows, {df.shape[1]} columns")
-        return df
-    except Exception as e:
-        logger.error(f"Error loading data from {data_path}: {str(e)}")
-        return None
+        if not next_action:
+            break
+            
+        # Execute the agent
+        agent = agent_registry.get_agent(next_action['agent_name'])
+        if not agent:
+            break
+            
+        # Get agent output
+        output = agent.execute_task(next_action['task'])
+        
+        # Store output in context
+        context_manager.store_agent_output(next_action['agent_name'], output)
+        
+        # Execute output if needed (like target generation code)
+        execution_result = execution_engine.execute_agent_output(
+            next_action['agent_name'], 
+            output
+        )
+        
+        if execution_result:
+            # Store execution results in context
+            context_manager.store_execution_result(
+                next_action['agent_name'],
+                execution_result
+            )
+            
+        # Print progress
+        print_progress(context_manager)
 
 def main():
     parser = argparse.ArgumentParser(description="Autonomous Agent Framework")
@@ -375,11 +443,11 @@ def main():
     
     # Load data if provided
     if args.data_path:
-        df = load_data(args.data_path)
+        df = load_data(args, context_manager)
         if df is not None:
             # Add to context manager
             file_name = os.path.basename(args.data_path)
-            context_manager.add_table(file_name, df)
+            context_manager.store_table(file_name, df)
             logger.info(f"Added table '{file_name}' to context")
     
     # Create execution engine

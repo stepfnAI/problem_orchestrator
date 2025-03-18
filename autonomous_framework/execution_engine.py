@@ -3,6 +3,8 @@ from sfn_blueprint import Task
 from autonomous_framework.agent_registry import AgentRegistry
 from autonomous_framework.context_manager import ContextManager
 from autonomous_framework.meta_agent import MetaAgent
+from autonomous_framework.agent_output_processor import AgentOutputProcessor
+from autonomous_framework.agent_input_processor import AgentInputProcessor
 
 class ExecutionEngine:
     """
@@ -13,6 +15,9 @@ class ExecutionEngine:
         self.agent_registry = agent_registry
         self.context_manager = context_manager
         self.meta_agent = MetaAgent(agent_registry, context_manager)
+        self.output_processor = AgentOutputProcessor(context_manager)
+        self.input_processor = AgentInputProcessor(context_manager)
+        self.df = None  # Add dataframe storage at engine level
         
     def run_step(self, goal=None, user_input=None):
         """Run a single step of the workflow
@@ -51,80 +56,77 @@ class ExecutionEngine:
         # Check if this would create a loop (same agent called repeatedly)
         # Get the last few steps from the context
         recent_steps = self.context_manager.get_recent_steps(3)
-        if recent_steps and all(step == next_agent_name for step in recent_steps):
-            print(f"Preventing loop: {next_agent_name} has been called repeatedly")
-            # Force a different agent by excluding the current one
-            alternative_agent = self._suggest_alternative_agent(next_agent_name)
-            if alternative_agent:
-                print(f"Suggesting alternative agent: {alternative_agent}")
-                next_agent_name = alternative_agent
-            else:
-                return {
-                    'agent': 'meta_agent',
-                    'reasoning': 'Loop detected and no alternative agent available',
-                    'output': {'error': 'Loop detected and no alternative agent available'},
-                    'next_agent': None
-                }
-        
-        # Get the agent
-        next_agent = self.agent_registry.get_agent(next_agent_name)
-        if not next_agent:
+        if len(recent_steps) >= 2 and all(step == next_agent_name for step in recent_steps[-2:]):
+            # If the same agent would be called 3 times in a row, this might be a loop
             return {
                 'agent': 'meta_agent',
-                'reasoning': meta_result.get('reasoning', ''),
-                'output': {'error': f'Agent {next_agent_name} not found'},
+                'reasoning': f"Detected potential loop with agent {next_agent_name}",
+                'output': {'error': f"Potential loop detected with agent {next_agent_name}"},
                 'next_agent': None
             }
         
-        # Add context manager to inputs if the agent has a set_context_manager method
-        if hasattr(next_agent, 'set_context_manager'):
-            next_agent.set_context_manager(self.context_manager)
+        # Get agent instance
+        agent = self.agent_registry.get_agent(next_agent_name)
+        if not agent:
+            return {
+                'agent': 'meta_agent',
+                'reasoning': meta_result.get('reasoning', ''),
+                'output': {'error': f"Agent {next_agent_name} not found"},
+                'next_agent': None
+            }
         
-        # Resolve any DataFrame references in the inputs
-        inputs = meta_result.get('inputs', {})
-        resolved_inputs = {}
+        # Process inputs for the agent
+        processed_inputs = self.input_processor.process(next_agent_name, meta_result.get('inputs', {}))
         
-        for key, value in inputs.items():
-            # Special handling for DataFrame references
-            if key == 'df' and isinstance(value, str):
-                # Try to get the DataFrame from the context manager
-                df = self.context_manager.get_table(value)
-                if df is not None:
-                    resolved_inputs[key] = df
-                else:
-                    # If we can't find the DataFrame, return an error
-                    return {
-                        'agent': next_agent_name,
-                        'reasoning': meta_result.get('reasoning', ''),
-                        'output': {'error': f"Table '{value}' not found in context"},
-                        'next_agent': None
-                    }
-            else:
-                # For all other inputs, pass them through unchanged
-                resolved_inputs[key] = value
-        
-        # Create task for next agent with resolved inputs
+        # Create task for agent
         agent_task = Task(
-            description=f"Execute {next_agent_name} task",
-            data=resolved_inputs
+            description=f"Execute {next_agent_name}",
+            data=processed_inputs
         )
         
-        # Call next agent
+        # Call agent
         try:
-            agent_result = next_agent.execute_task(agent_task)
+            agent_output = agent.execute_task(agent_task)
             
-            # Store the agent output in the context
-            self.context_manager.store_agent_output(next_agent_name, agent_result)
+            # Process the agent output based on its type
+            current_df = self.context_manager.get_current_dataframe()
+            processed_output = self.output_processor.process(
+                next_agent_name, 
+                agent_output,
+                current_df
+            )
             
-            # Return step result
+            # Store both raw and processed outputs
+            self.context_manager.store_agent_output(next_agent_name, agent_output)
+            if processed_output != agent_output:
+                self.context_manager.store_processed_output(next_agent_name, processed_output)
+            
+            # Update current dataframe if it was modified
+            if isinstance(processed_output, dict) and processed_output.get("success") and "processed_data" in processed_output:
+                self.context_manager.update_dataframe(processed_output["processed_data"])
+                
+            # Store step in context
+            self.context_manager.add_step_to_workflow(next_agent_name)
+            
+            # Mark the agent as executed in the meta agent
+            self.meta_agent.mark_agent_executed(next_agent_name)
+            
+            # Return result
             return {
                 'agent': next_agent_name,
                 'reasoning': meta_result.get('reasoning', ''),
-                'output': agent_result,
-                'next_agent': meta_result.get('next_agent')
+                'output': agent_output,
+                'processed_output': processed_output if processed_output != agent_output else None,
+                'next_agent': self.meta_agent.decide_next_agent(agent_output)
             }
         except Exception as e:
-            # Handle agent execution error
+            # Handle error
+            error_message = f"Error executing agent {next_agent_name}: {str(e)}"
+            print(error_message)
+            
+            # Store error in context
+            self.context_manager.add_error(error_message)
+            
             return {
                 'agent': next_agent_name,
                 'reasoning': meta_result.get('reasoning', ''),
@@ -199,4 +201,60 @@ class ExecutionEngine:
             'steps': steps,
             'final_output': steps[-1]['output'] if steps else None,
             'completed': len(steps) > 0 and 'error' not in steps[-1].get('output', {})
-        } 
+        }
+
+    def execute_agent_output(self, agent_name: str, agent_output: Dict):
+        """Execute the output from agents that generate code"""
+        if agent_name == "target_generator":
+            return self._execute_target_generation(agent_output)
+        # Add other agent output executions as needed
+        return None
+
+    def _execute_target_generation(self, agent_output: Dict) -> Dict:
+        """Execute target generation code and return results"""
+        try:
+            # Get current dataframe
+            df = self.context_manager.get_current_dataframe()
+            
+            # Execute the generated code
+            import pandas as pd
+            import numpy as np
+            
+            # Create a copy of df to avoid modifying original
+            df_copy = df.copy()
+            
+            # Execute the code with proper context
+            exec_locals = {
+                'df': df_copy,
+                'pd': pd,
+                'np': np
+            }
+            
+            # Execute the code
+            exec(agent_output['code'], {}, exec_locals)
+            
+            # Get the resulting dataframe
+            df_with_target = exec_locals['df']
+            
+            # Verify target column exists
+            if 'target' not in df_with_target.columns:
+                raise ValueError("Target column not created by the code")
+
+            # Store the updated dataframe
+            self.context_manager.update_dataframe(df_with_target)
+            
+            # Return execution results
+            return {
+                "success": True,
+                "target_preview": df_with_target[['target']].head().to_dict(),
+                "target_stats": {
+                    "distribution": df_with_target['target'].value_counts().to_dict(),
+                    "null_count": df_with_target['target'].isnull().sum()
+                }
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            } 
