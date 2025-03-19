@@ -111,20 +111,20 @@ class SFNDataMappingAgent(SFNAgent):
 
     def _validate_mappings(self, mappings: Dict[str, str], mandatory_fields: List[str], optional_fields: List[str]) -> Dict[str, str]:
         """Validate the mappings"""
-        print(f">>>Mappings before validation: {mappings}")
+        print(f">>>Mappings{mappings}")
         
-        # Check if all mandatory fields are mapped
-        for field in mandatory_fields:
-            if field not in mappings or mappings[field] is None:
-                print(f"Warning: Mandatory field '{field}' is not mapped")
+        # # Check if all mandatory fields are mapped
+        # for field in mandatory_fields:
+        #     if field not in mappings or mappings[field] is None:
+        #         print(f"Warning: Mandatory field '{field}' is not mapped")
         
-        # Create result dictionary with all fields (mandatory + optional)
-        result = {}
-        for field in mandatory_fields + optional_fields:
-            result[field] = mappings.get(field)
+        # # Create result dictionary with all fields (mandatory + optional)
+        # result = {}
+        # for field in mandatory_fields + optional_fields:
+        #     result[field] = mappings.get(field)
         
-        print(f">>>Mappings after validation: {result}")
-        return result
+        # print(f">>>Mappings after validation: {result}")
+        return mappings
     
     def get_validation_params(self, response, task):
         """Get validation parameters"""

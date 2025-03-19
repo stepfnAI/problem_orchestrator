@@ -207,8 +207,7 @@ class MetaAgent(SFNAgent):
             model=self.model_config["model"]
         )
         print(">>> META AGENT RESPONSE:")
-        print(response)
-        print(">>> END META AGENT RESPONSE")
+
         return self._parse_response(response)
     
     def _parse_response(self, response) -> Dict[str, Any]:
