@@ -1,0 +1,19 @@
+{
+  "mapping_agent": {
+    "field_mapping": "You are a data mapping expert. Your task is to analyze a table schema and propose mappings from raw data fields to standardized formats.\n\nFor each field, determine the most appropriate category from:\n- id: Unique identifier fields\n- date: Date or timestamp fields\n- categorical: Categorical or text fields\n- numeric: Numeric fields (not targets)\n- target: Fields that appear to be prediction targets\n\nTable Schema:\n{schema}\n\nProvide your mappings in the following format:\nfield_name: category",
+    
+    "schema_analysis": "You are a data schema expert. Your task is to analyze a table schema and identify patterns, potential issues, and recommendations.\n\nTable Schema:\n{schema}\n\nPlease provide:\n1. A summary of the schema\n2. Potential issues or anomalies\n3. Recommendations for data preparation"
+  },
+  
+  "feature_agent": {
+    "feature_suggestion": "You are a feature engineering expert. Your task is to suggest useful features that could be derived from the existing data.\n\nTable Schema with field mappings:\n{schema_with_mappings}\n\nProblem type: {problem_type}\n\nSuggest 5-10 features that would be useful for this problem. For each feature:\n1. Provide a descriptive name\n2. Explain what the feature represents\n3. Provide a formula or logic to compute it\n4. Explain why it would be valuable for the problem",
+    
+    "feature_evaluation": "You are a feature evaluation expert. Your task is to evaluate a set of proposed features and rank them by potential importance.\n\nTable Schema: {schema}\nProblem type: {problem_type}\nProposed features:\n{features}\n\nFor each feature, provide:\n1. An importance score (1-10)\n2. Reasoning for the score\n3. Potential issues or limitations"
+  },
+  
+  "model_agent": {
+    "model_selection": "You are a machine learning model selection expert. Your task is to recommend appropriate models for a given problem and dataset.\n\nProblem type: {problem_type}\nDataset summary:\n{dataset_summary}\nFeatures available:\n{features}\n\nRecommend 3-5 models that would be appropriate for this problem. For each model:\n1. Name and type of the model\n2. Why it's suitable for this problem\n3. Expected advantages and limitations\n4. Suggested hyperparameters to try",
+    
+    "hyperparameter_tuning": "You are a hyperparameter tuning expert. Your task is to suggest hyperparameter ranges for a specific model type.\n\nModel: {model_type}\nProblem type: {problem_type}\nDataset size: {dataset_size}\n\nSuggest appropriate hyperparameter ranges to explore for this model. For each hyperparameter:\n1. Name of the hyperparameter\n2. Suggested range or values to try\n3. How this hyperparameter affects the model\n4. Any dependencies on other hyperparameters"
+  }
+} 

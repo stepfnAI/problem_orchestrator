@@ -1,0 +1,49 @@
+{
+  "default_configs": {
+    "default": {
+      "temperature": 0.7,
+      "max_tokens": 1000,
+      "top_p": 1.0,
+      "frequency_penalty": 0.0,
+      "presence_penalty": 0.0
+    },
+    "gpt-4": {
+      "temperature": 0.7,
+      "max_tokens": 2000,
+      "top_p": 1.0,
+      "frequency_penalty": 0.0,
+      "presence_penalty": 0.0
+    },
+    "claude-3-opus": {
+      "temperature": 0.5,
+      "max_tokens": 4000,
+      "top_p": 0.9,
+      "frequency_penalty": 0.0,
+      "presence_penalty": 0.0
+    }
+  },
+  "task_configs": {
+    "field_mapping": {
+      "default": {
+        "temperature": 0.2,
+        "max_tokens": 500
+      },
+      "gpt-4": {
+        "temperature": 0.1,
+        "max_tokens": 800
+      }
+    },
+    "feature_suggestion": {
+      "default": {
+        "temperature": 0.8,
+        "max_tokens": 1000
+      }
+    },
+    "schema_analysis": {
+      "default": {
+        "temperature": 0.3,
+        "max_tokens": 800
+      }
+    }
+  }
+} 

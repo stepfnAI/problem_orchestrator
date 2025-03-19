@@ -94,3 +94,5 @@ temp_files/
 
 #session
 *.sessions/
+.state/
+.cursor/
