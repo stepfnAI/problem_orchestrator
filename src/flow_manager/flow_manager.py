@@ -63,4 +63,13 @@ class FlowManager:
             return {
                 "status": "failed",
                 "error": error_msg
-            } 
+            }
+    
+    def get_available_flows(self) -> list:
+        """
+        Get a list of available flows.
+        
+        Returns:
+            List of flow IDs
+        """
+        return list(self.registry.flows.keys()) 

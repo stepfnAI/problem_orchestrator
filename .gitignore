@@ -96,3 +96,4 @@ temp_files/
 *.sessions/
 .state/
 .cursor/
+state.json

@@ -20,6 +20,7 @@ class UserInputService:
         self.interaction_queue = []
         self.interaction_history = []
         self.interactive = interactive
+        logger.info(f"User Input Service initialized with interactive mode: {interactive}")
     
     def request_input(self, question: str, options: Optional[List[str]] = None, 
                      response_format: str = "free_text", 
@@ -50,7 +51,7 @@ class UserInputService:
             "timestamp": self._get_timestamp()
         }
         
-        logger.info(f"Input request from {requester_id}: {question}")
+        logger.info(f"Input request from {requester_id}: {question} (interactive={self.interactive})")
         
         # Get the response
         if self.interactive:
@@ -86,18 +87,21 @@ class UserInputService:
         response_format = request["response_format"]
         options = request["options"]
         
-        print(f"\n{question}")
+        print(f"\n[USER INPUT REQUIRED] {question}")
         
         if response_format == "single_select" and options:
+            print("Available options:")
             for i, option in enumerate(options):
                 print(f"{i+1}. {option}")
             
             while True:
                 try:
-                    choice = input("Enter your choice (number): ")
+                    choice = input("\nEnter your choice (number): ")
                     index = int(choice) - 1
                     if 0 <= index < len(options):
-                        return options[index]
+                        selected = options[index]
+                        print(f"You selected: {selected}")
+                        return selected
                     else:
                         print(f"Please enter a number between 1 and {len(options)}")
                 except ValueError:
@@ -120,7 +124,7 @@ class UserInputService:
         
         elif response_format == "yes_no":
             while True:
-                response = input("Enter yes or no: ").lower()
+                response = input("[yes/no] > ").lower()
                 if response in ["yes", "y"]:
                     return "yes"
                 elif response in ["no", "n"]:

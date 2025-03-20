@@ -29,7 +29,7 @@ class MappingAgent(SpecializedAgent):
             schema: Dictionary mapping field names to their types
             
         Returns:
-            Dictionary mapping input fields to standard field names
+            Dictionary mapping standard field names to input fields
         """
         logger.info(f"Proposing field mappings for {len(schema)} fields")
         
@@ -53,58 +53,42 @@ class MappingAgent(SpecializedAgent):
         - OTHER: Fields that don't fit above categories
 
         Return a JSON mapping where:
-        - Keys are the input field names
-        - Values are the standard field names they most closely match
+        - Keys are the standard field names (from the categories above)
+        - Values are the input field names they most closely match
 
         Example:
         {{
-            "user_id": "ID",
-            "item_name": "PRODUCT",
-            "purchase_ts": "TIMESTAMP",
-            "is_churned": "TARGET",
-            "total_spent": "REVENUE"
+            "ID": "user_id",
+            "PRODUCT": "item_name",
+            "TIMESTAMP": "purchase_ts",
+            "TARGET": "is_churned",
+            "REVENUE": "total_spent"
         }}
+
+        Notes:
+        - Not every standard field category needs to be used
+        - Only include standard categories that have a clear match in the input data
+        - You can map multiple input fields to the same standard category if needed
 
         Only return the JSON mapping, no other text.
         """
         
+        # Make the LLM call
+        logger.info("Sending field mapping prompt to LLM")
+        response = self.llm_agent.generate_text(prompt, max_tokens=500)
+        
+        # Parse the JSON response
+        json_content = response
+        if '{' in response and '}' in response:
+            start_idx = response.find('{')
+            end_idx = response.rfind('}') + 1
+            json_content = response[start_idx:end_idx]
+        
         try:
-            # Make the LLM call
-            logger.info("Sending field mapping prompt to LLM")
-            response = self.llm_agent.generate_text(prompt, max_tokens=500)
-            print(f">> LLM response: {response}")  # temp
-            
-            # Parse the JSON response
-            json_content = response
-            if '{' in response and '}' in response:
-                start_idx = response.find('{')
-                end_idx = response.rfind('}') + 1
-                json_content = response[start_idx:end_idx]
-            
             mappings = json.loads(json_content)
             logger.info(f"Successfully parsed field mappings from LLM response: {mappings}")
             return mappings
-            
         except Exception as e:
-            logger.error(f"Error proposing field mappings: {str(e)}")
-            logger.info("Using fallback mapping logic due to error")
-            # Fallback mappings based on standard field names
-            mappings = {}
-            for field, field_type in schema.items():
-                if "id" in field.lower():
-                    mappings[field] = "ID"
-                elif "product" in field.lower() or "item" in field.lower():
-                    mappings[field] = "PRODUCT"
-                elif "date" in field.lower() or "time" in field.lower():
-                    mappings[field] = "TIMESTAMP"
-                elif "churn" in field.lower() or "target" in field.lower():
-                    mappings[field] = "TARGET"
-                elif "amount" in field.lower() or "price" in field.lower() or "revenue" in field.lower():
-                    mappings[field] = "REVENUE"
-                elif field_type == "string":
-                    mappings[field] = "CATEGORY"
-                elif field_type == "numeric":
-                    mappings[field] = "METRIC"
-                else:
-                    mappings[field] = "OTHER"
-            return mappings 
+            logger.error(f"Error parsing LLM response: {str(e)}")
+            # Return empty mappings if parsing fails
+            return {} 

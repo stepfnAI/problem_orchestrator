@@ -1,5 +1,5 @@
 """
-Feature Agent - Specialized agent for feature engineering tasks.
+Feature Agent - Suggests and implements features for data science problems.
 """
 
 from typing import Dict, List, Any
@@ -7,17 +7,16 @@ import logging
 import json
 
 from .specialized_agent import SpecializedAgent
-from .model_config import ModelConfig
 from .llm_agent import LLMAgent
 
 logger = logging.getLogger(__name__)
 
 class FeatureAgent(SpecializedAgent):
     """
-    Specialized agent for feature engineering tasks.
+    Agent for suggesting and implementing features for data science problems.
     
-    This agent suggests and evaluates features based on the dataset schema
-    and problem type.
+    This agent analyzes data schemas and problem types to suggest
+    relevant features, and generates code to implement those features.
     """
     
     def __init__(self, model_name: str = "default"):
@@ -29,152 +28,154 @@ class FeatureAgent(SpecializedAgent):
         """
         super().__init__(model_name)
         self.llm_agent = LLMAgent(model_name=model_name)
+        self.agent_type = "feature_agent"
     
-    def suggest_features(self, schema: Dict[str, Any], problem_type: str) -> List[Dict[str, Any]]:
+    def suggest_features(self, schema: Dict[str, Any], problem_type: str, 
+                        problem_description: str = "") -> List[Dict[str, Any]]:
         """
         Suggest features based on the schema and problem type.
         
         Args:
-            schema: Dictionary mapping field names to their metadata
-            problem_type: Type of problem (e.g., regression, classification)
+            schema: Schema of the data
+            problem_type: Type of problem (regression, classification, etc.)
+            problem_description: Description of the problem
             
         Returns:
             List of suggested features
         """
-        logger.info(f"Suggesting features for {problem_type} problem with {len(schema)} fields")
+        logger.info("Suggesting features")
         
-        # Create a prompt for feature suggestions
-        schema_str = json.dumps(schema, indent=2)
-        
+        # Create prompt for LLM
         prompt = f"""
-        Given the following schema and problem type, suggest features that might be useful.
+        You are an expert feature engineer for data science problems.
         
-        Problem Type: {problem_type}
+        Given the following data schema and problem type, suggest relevant features that would improve model performance.
         
         Schema:
-        {schema_str}
+        {json.dumps(schema, indent=2)}
         
-        Please suggest features that could be derived from the existing fields.
+        Problem Type: {problem_type}
+        Problem Description: {problem_description}
+        
         For each feature, provide:
-        1. A name
-        2. A description
-        3. The formula or logic to create it
-        4. An importance score (1-10)
+        1. A descriptive name
+        2. A clear description of what the feature represents
+        3. The rationale for why this feature would be useful for the problem
+        4. The complexity of implementing this feature (Low, Medium, High)
+        5. The expected data type of the feature (numeric, categorical, boolean, etc.)
         
-        Format your response as a JSON array of feature objects:
-        [
-            {{
-                "name": "feature_name",
-                "description": "Feature description",
-                "formula": "SQL or pseudocode formula",
-                "importance": 8
-            }},
-            ...
-        ]
+        Respond with a JSON array of feature suggestions, with each suggestion having the following structure:
+        {{
+            "name": "feature_name",
+            "description": "Description of what this feature represents",
+            "rationale": "Why this feature would be useful for the problem",
+            "complexity": "Low|Medium|High",
+            "data_type": "numeric|categorical|boolean|date",
+            "input_fields": ["field1", "field2"]  // Fields used to create this feature
+        }}
         
-        Only include the JSON array in your response, no additional text.
+        Focus on features that are:
+        - Relevant to the problem type
+        - Diverse in nature (aggregations, ratios, time-based, etc.)
+        - Implementable with the available data
+        - Likely to have predictive power
+        
+        Suggest 3-5 high-quality features.
         """
         
+        # Make the LLM call
+        logger.info("Sending feature suggestion prompt to LLM")
+        response = self.llm_agent.generate_text(prompt, max_tokens=1000)
+        
+        # Parse the JSON response
         try:
-            # Make the LLM call
-            response = self.llm_agent.generate_text(prompt, max_tokens=1000)
-            
-            # Parse the JSON response
-            # Find JSON content between square brackets
+            # Extract JSON from response
             json_content = response
             if '[' in response and ']' in response:
                 start_idx = response.find('[')
                 end_idx = response.rfind(']') + 1
                 json_content = response[start_idx:end_idx]
             
-            features = json.loads(json_content)
-            return features
+            suggestions = json.loads(json_content)
+            logger.info(f"Successfully parsed {len(suggestions)} feature suggestions from LLM response")
+            return suggestions
+            
         except Exception as e:
-            logger.error(f"Error suggesting features: {str(e)}")
-            # Fallback feature suggestions
-            features = []
-            
-            # Generate some basic feature suggestions based on the schema
-            for field, info in schema.items():
-                field_type = info.get("type", "")
-                mapping = info.get("mapping", "")
-                
-                if mapping == "date":
-                    # Date-based features
-                    features.append({
-                        "name": f"month_{field}",
-                        "description": f"Month extracted from {field}",
-                        "formula": f"EXTRACT(MONTH FROM {field})",
-                        "importance": 8
-                    })
-                    
-                    features.append({
-                        "name": f"day_of_week_{field}",
-                        "description": f"Day of week extracted from {field}",
-                        "formula": f"EXTRACT(DOW FROM {field})",
-                        "importance": 7
-                    })
-                
-                elif mapping == "categorical":
-                    # Categorical features
-                    features.append({
-                        "name": f"encoded_{field}",
-                        "description": f"One-hot encoded version of {field}",
-                        "formula": f"ONE_HOT_ENCODE({field})",
-                        "importance": 8
-                    })
-                
-                elif mapping == "numerical":
-                    # Numerical features
-                    features.append({
-                        "name": f"normalized_{field}",
-                        "description": f"Normalized version of {field}",
-                        "formula": f"({field} - MIN({field})) / (MAX({field}) - MIN({field}))",
-                        "importance": 6
-                    })
-            
-            return features
+            logger.error(f"Error parsing LLM response: {str(e)}")
+            # Return empty list if parsing fails
+            return []
     
-    def evaluate_features(self, schema: Dict[str, str], problem_type: str, 
-                         features: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def generate_feature_code(self, feature: Dict[str, Any], schema: Dict[str, Any], 
+                             table_name: str) -> Dict[str, Any]:
         """
-        Evaluate proposed features and rank them by importance.
+        Generate code to implement a feature.
         
         Args:
-            schema: Dictionary mapping field names to their types
-            problem_type: Type of problem (regression, classification, etc.)
-            features: List of feature dictionaries to evaluate
+            feature: Feature to implement
+            schema: Schema of the data
+            table_name: Name of the table
             
         Returns:
-            List of evaluated features with importance scores
+            Dictionary with implementation details
         """
-        # Format the schema for the prompt
-        schema_str = "\n".join([f"{field}: {field_type}" for field, field_type in schema.items()])
+        logger.info(f"Generating code for feature: {feature['name']}")
         
-        # Format the features for the prompt
-        features_str = "\n".join([
-            f"{i+1}. {feature['name']}: {feature['description']} - {feature['formula']}"
-            for i, feature in enumerate(features)
-        ])
+        # Create prompt for LLM
+        prompt = f"""
+        You are an expert data scientist who writes clean, efficient code to implement features.
         
-        # Get the formatted prompt
-        prompt = self.get_prompt("feature_evaluation", 
-                                schema=schema_str,
-                                problem_type=problem_type,
-                                features=features_str)
+        I need you to write Python code to implement the following feature:
         
-        if not prompt:
-            logger.warning("Feature evaluation prompt not found, using fallback logic")
-            return features  # Just return the original features as fallback
+        Feature Name: {feature['name']}
+        Description: {feature['description']}
+        Input Fields: {', '.join(feature.get('input_fields', []))}
         
-        # Get model config for this task
-        config = ModelConfig.get_config(self.model_name, "feature_evaluation")
+        Data Schema:
+        {json.dumps(schema, indent=2)}
         
-        # In a real implementation, this would call the LLM with the prompt
-        # For now, just return the features with some dummy scores
-        for feature in features:
-            if "importance" not in feature:
-                feature["importance"] = 5  # Default importance
+        Table Name: {table_name}
         
-        # Sort by importance (descending)
-        return sorted(features, key=lambda x: x.get("importance", 0), reverse=True) 
+        Write Python code that:
+        1. Assumes the data is in a pandas DataFrame named 'df'
+        2. Creates the feature and adds it as a new column to the DataFrame
+        3. Handles potential edge cases (nulls, divisions by zero, etc.)
+        4. Is efficient and readable
+        
+        Your response should be a JSON object with:
+        1. "code": The Python code to implement the feature
+        2. "explanation": A brief explanation of how the code works
+        3. "dependencies": Any Python packages required beyond pandas and numpy
+        
+        Example response:
+        {{
+            "code": "df['price_per_unit'] = df['total_price'] / df['quantity'].replace(0, np.nan)",
+            "explanation": "This creates a price per unit feature by dividing total price by quantity, replacing zeros with NaN to avoid division by zero errors.",
+            "dependencies": []
+        }}
+        """
+        
+        # Make the LLM call
+        logger.info("Sending feature implementation prompt to LLM")
+        response = self.llm_agent.generate_text(prompt, max_tokens=800)
+        
+        # Parse the JSON response
+        try:
+            # Extract JSON from response
+            json_content = response
+            if '{' in response and '}' in response:
+                start_idx = response.find('{')
+                end_idx = response.rfind('}') + 1
+                json_content = response[start_idx:end_idx]
+            
+            implementation = json.loads(json_content)
+            logger.info(f"Successfully parsed feature implementation from LLM response")
+            return implementation
+            
+        except Exception as e:
+            logger.error(f"Error parsing LLM response: {str(e)}")
+            # Return basic implementation if parsing fails
+            return {
+                "code": f"# Failed to generate code for {feature['name']}\n# Error: {str(e)}",
+                "explanation": "Code generation failed",
+                "dependencies": []
+            } 

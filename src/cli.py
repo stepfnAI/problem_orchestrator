@@ -14,6 +14,7 @@ from meta_agent.meta_agent import MetaAgent
 from utils.logging_utils import setup_logging, create_timed_rotating_log_file
 from services.state_manager import StateManager
 import pandas as pd
+from src.agents.llm_agent import LLMAgent
 
 def setup_parser() -> argparse.ArgumentParser:
     """Set up the argument parser."""
@@ -260,52 +261,57 @@ def show_state(args: argparse.Namespace) -> None:
 
 def run_workflow(args: argparse.Namespace) -> None:
     """Run the entire workflow."""
-    print(f"Starting workflow for goal: {args.goal}")
-    
     # 1. Initialize the problem
-    config = {
-        "model_name": args.model,
-        "interactive": args.interactive
-    }
+    goal = args.goal
+    print(f"Starting workflow for goal: {goal}")
     
-    meta_agent = MetaAgent(config)
-    meta_agent.initialize_problem(args.goal)
+    # Initialize the meta agent with interactive mode enabled
+    meta_agent = MetaAgent.get_instance(config={"interactive": True})
     
-    problem_type = meta_agent.problem_context.get('problem_type', 'unknown')
-    print(f"Problem initialized with type: {problem_type}")
+    # Initialize the problem (this will prompt the user for problem type)
+    meta_agent.initialize_problem(goal)
+    
+    # Get the problem type from the initialized context
+    problem_type = meta_agent.problem_context.get("problem_type")
+    
+    # Use the singleton instance of StateManager
+    state_manager = StateManager.get_instance()
     
     # 2. Load the data files
-    state_manager = StateManager()
-    input_tables = []
-    
     for data_path in args.data_path:
         print(f"\nLoading data from: {data_path}")
         
-        # Read the actual CSV file to get schema
-        df = pd.read_csv(data_path)
+        # Load the data
+        try:
+            df = pd.read_csv(data_path)
+        except Exception as e:
+            print(f"Error loading data: {str(e)}")
+            continue
         
-        # Determine table name from file path
-        base_name = os.path.basename(data_path)
-        table_name = os.path.splitext(base_name)[0]
-        input_tables.append(table_name)
+        # Get the table name from the file path
+        table_name = os.path.splitext(os.path.basename(data_path))[0]
         
-        # Create schema from actual DataFrame columns
+        # Get the schema
         table_schema = {}
-        for col in df.columns:
-            if pd.api.types.is_numeric_dtype(df[col]):
-                table_schema[col] = "numeric"
-            elif pd.api.types.is_datetime64_any_dtype(df[col]):
-                table_schema[col] = "date"
+        for column in df.columns:
+            if pd.api.types.is_numeric_dtype(df[column]):
+                table_schema[column] = "numeric"
             else:
-                table_schema[col] = "string"
+                table_schema[column] = "string"
         
         print("Actual schema from data:")
         print(json.dumps(table_schema, indent=2))
         
-        # Update state with the new table
+        # Update the state with the loaded table
         state = state_manager.get_state()
         if "tables" not in state:
             state["tables"] = {}
+        if "available_tables" not in state:
+            state["available_tables"] = []
+        
+        # Add the table to available_tables if not already there
+        if table_name not in state["available_tables"]:
+            state["available_tables"].append(table_name)
         
         state["tables"][table_name] = {
             "schema": table_schema,
@@ -323,78 +329,19 @@ def run_workflow(args: argparse.Namespace) -> None:
         state_manager.update_state(state)
         print(f"Data loaded as table '{table_name}'")
     
-    # 3. Execute the mapping flow
-    print("\n--- Executing Mapping Flow ---")
-    mapping_input = {
-        "problem_context": meta_agent.problem_context,
-        "current_state": state_manager.get_state(),
-        "input_tables": input_tables,
-        "parameters": {},
-        "meta_agent": meta_agent  # Pass the meta agent instance
-    }
+    # 3. Use Meta Agent orchestration
+    print("\n--- Starting Meta Agent Orchestration ---")
+    workflow_result = meta_agent.orchestrate_workflow()
     
-    mapping_result = meta_agent.flow_manager.execute_flow("mapping_flow", mapping_input)
-    
-    if mapping_result.get("status") != "completed":
-        print(f"Mapping flow failed: {mapping_result.get('error', 'Unknown error')}")
-        return
-    
-    # Update state with mapping results
-    current_state = state_manager.get_state()
-    if "tables" in mapping_result:
-        if "tables" not in current_state:
-            current_state["tables"] = {}
-        current_state["tables"].update(mapping_result["tables"])
-        state_manager.update_state(current_state)
-    
-    mapped_table = mapping_result.get("output_table")
-    print(f"Mapping completed: {mapping_result.get('summary')}")
-    
-    # 4. Execute the feature suggestion flow
-    print("\n--- Executing Feature Suggestion Flow ---")
-    feature_input = {
-        "problem_context": meta_agent.problem_context,
-        "current_state": state_manager.get_state(),
-        "input_tables": [mapped_table],
-        "parameters": {},
-        "meta_agent": meta_agent  # Pass the meta agent instance
-    }
-    
-    feature_result = meta_agent.flow_manager.execute_flow("feature_suggestion_flow", feature_input)
-    
-    if feature_result.get("status") != "completed":
-        print(f"Feature suggestion flow failed: {feature_result.get('error', 'Unknown error')}")
-        return
-    
-    # Update state with feature results
-    current_state = state_manager.get_state()
-    if "tables" in feature_result:
-        if "tables" not in current_state:
-            current_state["tables"] = {}
-        current_state["tables"].update(feature_result["tables"])
-        state_manager.update_state(current_state)
-    
-    print(f"Feature suggestion completed: {feature_result.get('summary')}")
-    
-    # 5. Show final results
+    # 4. Show final results
     print("\n--- Workflow Summary ---")
     print(f"Goal: {args.goal}")
     print(f"Problem type: {problem_type}")
     print(f"Data source: {', '.join(args.data_path)}")
-    print(f"Mapping results: {mapping_result.get('summary')}")
-    print(f"Feature suggestions: {feature_result.get('summary')}")
+    print(f"Workflow status: {workflow_result.get('status')}")
     
-    # Show top features
-    if "tables" in feature_result:
-        feature_table = feature_result.get("output_table")
-        if feature_table and feature_table in feature_result["tables"]:
-            features = feature_result["tables"][feature_table].get("features", [])
-            if features:
-                print("\nTop suggested features:")
-                for i, feature in enumerate(features[:5]):  # Show top 5
-                    print(f"  {i+1}. {feature.get('name')} (importance: {feature.get('importance', 'N/A')})")
-                    print(f"     {feature.get('description')}")
-                    print(f"     Formula: {feature.get('formula')}")
+    # Show results based on workflow_result
+    # ...
 
 def setup_logging(log_level: str, log_file: str) -> None:
     """Set up logging configuration."""
